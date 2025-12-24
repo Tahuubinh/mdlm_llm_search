@@ -106,9 +106,9 @@ def calculate_perplexity_batch(model, tokenizer, texts, device, batch_size=50):
 
 if __name__ == "__main__":
     # Configuration
-    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/standard/['sa', 'qed']_lb[-1000.0, 1.0]_ub[3.5, 1000.0]/18/seed_0/molecules"
-    num_samples = 64
-    batch_size = 64
+    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/bon/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test/seed_0/molecules/"
+    num_samples = 8
+    batch_size = 8
     
     # Load GPT-2 model (using 'gpt2-large' as per the paper)
     print("Loading GPT-2 model...")

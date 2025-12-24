@@ -2,6 +2,8 @@
 from properties.peptides import *
 from properties.molecules import *
 from properties.trna import *
+from properties.toxicity_property import calculate_toxicity, calc_toxicity_parallel
+from properties.perplexity_property import calculate_perplexity, calc_perplexity_parallel
 from properties.property_util import *
 
 
@@ -60,6 +62,8 @@ class Sampler:
                 "acceptor_stem": count_acceptor_stem_parallel,
                 "t_loop": get_t_loop_score_parallel,
                 "fold": check_fold_structure_constraints_parallel,
+                "toxicity": calc_toxicity_parallel,
+                "perplexity": calc_perplexity_parallel,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")
@@ -78,6 +82,8 @@ class Sampler:
                 "acceptor_stem": count_acceptor_stem,
                 "t_loop": get_t_loop_score,
                 "fold": check_fold_structure_constraints,
+                "toxicity": calculate_toxicity,
+                "perplexity": calculate_perplexity,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")

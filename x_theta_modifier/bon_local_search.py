@@ -9,9 +9,14 @@ from properties.property_util import *
 
 class BoNLocalSearchXThetaModifier(XThetaModifier):
     
-    def __init__(self, *args, **kwargs):
-        """Initialize the Gumbel sampler."""
+    def __init__(self, top_k_values_for_local_search=10, *args, **kwargs):
+        """Initialize the BoN Local Search sampler.
+        
+        Args:
+            top_k_values_for_local_search: For language data, number of top-k tokens to try per position
+        """
         super().__init__(*args, **kwargs)
+        self.top_k_values_for_local_search = top_k_values_for_local_search
 
     def get_x_theta_method(self):
         if self.data == 'qm9':
@@ -21,12 +26,21 @@ class BoNLocalSearchXThetaModifier(XThetaModifier):
             modify_x_theta = modify_x_theta_no_condition
             print("Not using validity condition in XTheta Modifier.")
 
+        # Determine local search function based on data type
         if self.data == 'qm9':
             local_search = local_search_qm9
+            use_language_search = False
         elif self.data == 'grampa':
             local_search = local_search_grampa
+            use_language_search = False
         elif self.data == 'trna':
             local_search = local_search_trna
+            use_language_search = False
+        elif self.data in ['openwebtext-split', 'openwebtext', 'lm1b', 'wikitext103', 'wikitext2']:
+            # Language data - use new top-k local search
+            local_search = None  # Not used for language
+            use_language_search = True
+            print(f"Using language local search with top_k={self.top_k_values_for_local_search}")
         else:
             raise ValueError(f"Local search not implemented for data type: {self.data}")
         
@@ -49,7 +63,24 @@ class BoNLocalSearchXThetaModifier(XThetaModifier):
             best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
             old_best_tokens = best_tokens.clone()
 
-            best_tokens = local_search_on_best_tokens(best_tokens, tokenizer, self.num_local_searches, self.distance_to_bounds, self.property_calcs, local_search, device, self.max_candidate_tokens)
+            # Apply local search
+            if use_language_search:
+                # For language data, pass x_theta probabilities and top_k parameter
+                x_theta_probs = torch.softmax(x_theta, dim=-1)  # Convert logits to probabilities
+                best_tokens = local_search_on_best_tokens(
+                    best_tokens, tokenizer, self.num_local_searches, 
+                    self.distance_to_bounds, self.property_calcs, 
+                    local_search, device, self.max_candidate_tokens,
+                    x_theta=x_theta_probs, 
+                    top_k_values_for_local_search=self.top_k_values_for_local_search
+                )
+            else:
+                # For molecular/peptide data, use original local search
+                best_tokens = local_search_on_best_tokens(
+                    best_tokens, tokenizer, self.num_local_searches, 
+                    self.distance_to_bounds, self.property_calcs, 
+                    local_search, device, self.max_candidate_tokens
+                )
 
             new_x_theta, validity_mask = modify_x_theta(best_tokens, tokenizer, x_theta, batch_size, device)
             if validity_mask is not None and validity_mask.any():

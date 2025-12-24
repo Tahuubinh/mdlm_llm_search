@@ -60,6 +60,8 @@ def parse_arguments():
     parser.add_argument("--x_theta_max_num_local_search_iters", type=int, default=10000000, help="Maximum number of local search iterations for x_theta")
     parser.add_argument("--x_theta_num_local_searches", type=int, default=30, help="Number of local searches to perform for x_theta")
     parser.add_argument("--max_candidate_tokens", type=int, default=1000, help="Number of candidate tokens for local search")
+    parser.add_argument("--top_k_values_for_local_search", type=int, default=10, 
+                       help="For language data: number of top-k tokens to try per position in local search")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',
@@ -111,7 +113,7 @@ def main():
         checkpoint_path = 'outputs/toxicity/mdlm/best.ckpt'
         tokenizer_name_or_path = 'gpt2'
         sequence_length = 100
-        diffusion_steps = 1000  # Can adjust this
+        diffusion_steps = 100  # Can adjust this
 
     
     # Generate molecules

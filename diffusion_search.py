@@ -21,6 +21,7 @@ import utils
 # import posterior_sampling
 from posterior_sampling_modifier.posterior_sampling_modifier import SAMPLING_METHOD_CLASSES
 from x_theta_modifier.x_theta_modifier import X_THETA_MODIFIER_CLASSES
+from tqdm import tqdm
 
 LOG2 = math.log(2)
 
@@ -173,6 +174,7 @@ class Diffusion(L.LightningModule):
     num_x_theta_samples = getattr(config.sampling, 'num_x_theta_samples')
     x_theta_num_local_searches = getattr(config.sampling, 'x_theta_num_local_searches')
     max_candidate_tokens = getattr(config.sampling, 'max_candidate_tokens')
+    top_k_values_for_local_search = getattr(config.sampling, 'top_k_values_for_local_search', 10)  # Default to 10 if not set
 
     sampler = SAMPLING_METHOD_CLASSES[self.posterior_sampling_method](
         num_posterior_samples=num_posterior_samples,
@@ -206,6 +208,7 @@ class Diffusion(L.LightningModule):
         max_candidate_tokens=max_candidate_tokens,
         vocab_size=self.vocab_size,
         mask_index=self.mask_index,
+        top_k_values_for_local_search=top_k_values_for_local_search,
     )
     self._modify_x_theta = x_theta_modifier.get_x_theta_method()
 
@@ -728,7 +731,7 @@ class Diffusion(L.LightningModule):
     dt = (1 - eps) / num_steps
     p_x0_cache = None
 
-    for i in range(num_steps):
+    for i in tqdm(range(num_steps), desc="Sampling steps"):
       t = timesteps[i] * torch.ones(
         x.shape[0], 1, device=self.device)
       if self.sampler == 'ddpm':
@@ -827,8 +830,8 @@ class Diffusion(L.LightningModule):
     # Initialize best_clean_samples for x_theta modification
     best_clean_samples = None
     
-    # Diffusion sampling loop
-    for i in range(num_steps):
+    # Diffusion sampling loop with progress bar
+    for i in tqdm(range(num_steps), desc="Sampling steps", leave=False):
       t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
       
       # Get current sigma for conditioning
