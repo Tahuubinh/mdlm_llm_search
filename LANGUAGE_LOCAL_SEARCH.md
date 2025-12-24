@@ -4,6 +4,18 @@
 
 This implementation provides an efficient local search method specifically designed for language data. Instead of exhaustively trying all vocabulary tokens at each position (which would be ~50K × 100 positions = 5M evaluations), it uses the probability distribution from `x_theta` to guide the search.
 
+## Key Optimizations
+
+### 1. Smart Token Selection
+Uses model's `x_theta` probabilities to select only the most promising tokens for evaluation.
+
+### 2. Automatic BoN Skip (NEW!)
+When `num_x_theta_samples <= 1`, the system automatically skips Best-of-N (BoN) selection:
+- **No property evaluation** for sample selection
+- **Directly uses the single sample** as starting point
+- **Only local search** computes properties
+- **Significant speedup** when you only need local search refinement
+
 ## Algorithm
 
 ### Key Idea
@@ -45,15 +57,18 @@ python inference_search.py \
 ### Key Parameters
 
 - `--x_theta_type bon_localsearch`: Use BoN with local search
+- `--num_x_theta_samples N`: Number of samples for BoN selection
+  - **N = 1**: Skip BoN, only use local search (fast)
+  - **N > 1**: Use BoN + local search (thorough)
 - `--x_theta_num_local_searches 1`: Number of local search iterations (usually 1 is enough)
 - `--top_k_values_for_local_search K`: Number of top tokens to try per position
   - **Smaller K** = faster but less thorough search
   - **Larger K** = slower but more thorough search
   - Recommended: 5-20 for language data
 
-### Example: Toxicity + Perplexity
+### Example 1: Fast Mode (Local Search Only)
 
-Generate text with low toxicity and low perplexity:
+**Use when:** You want quick refinement without BoN overhead
 
 ```bash
 python inference_search.py \
@@ -61,7 +76,34 @@ python inference_search.py \
     --prefix_dir data/toxicity/1000_samples \
     --num_samples 10 \
     --batch_size 10 \
-    --version toxicity_perplexity_localsearch \
+    --version fast_local_search \
+    --x_theta_type bon_localsearch \
+    --num_x_theta_samples 1 \
+    --x_theta_num_local_searches 1 \
+    --top_k_values_for_local_search 5 \
+    --lower_bound 0 50 \
+    --upper_bound 0.75 150 \
+    --property_type toxicity perplexity \
+    --seed 0
+```
+
+**Benefits:**
+- ✅ No BoN property evaluation
+- ✅ Only local search evaluates properties
+- ✅ Faster per diffusion step
+- ✅ Good for initial exploration
+
+### Example 2: Thorough Mode (BoN + Local Search)
+
+**Use when:** You need best quality results
+
+```bash
+python inference_search.py \
+    --data openwebtext-split \
+    --prefix_dir data/toxicity/1000_samples \
+    --num_samples 10 \
+    --batch_size 10 \
+    --version thorough_bon_localsearch \
     --x_theta_type bon_localsearch \
     --num_x_theta_samples 16 \
     --x_theta_num_local_searches 1 \
@@ -90,12 +132,39 @@ This will:
    - Added `top_k_values_for_local_search` parameter
    - Auto-detect language data types
    - Pass `x_theta` probabilities to local search
+   - **Skip BoN when `num_x_theta_samples <= 1`**
 
-3. **`inference_search.py`**
+3. **`x_theta_modifier/bon.py`**
+   - **Skip BoN when `num_x_theta_samples <= 1`**
+
+4. **`x_theta_modifier/bon_local_search_last_step.py`**
+   - **Skip BoN when `num_x_theta_samples <= 1`**
+
+5. **`inference_search.py`**
    - Added `--top_k_values_for_local_search` argument
 
-4. **`inference_utils.py`**
+6. **`inference_utils.py`**
    - Pass new parameter through config pipeline
+
+7. **`diffusion_search.py`**
+   - Pass parameter to modifier instantiation
+
+### Optimization Logic
+
+```python
+if num_x_theta_samples_keepbest <= 1:
+    # Skip property evaluation - just use the sample directly
+    best_tokens = all_samples[0]
+    print("Skipping BoN selection (num_samples=1), using sample directly")
+else:
+    # Normal BoN: evaluate properties and select best
+    best_tokens = find_best_tokens(...)
+```
+
+This optimization is applied in:
+- `bon.py` - Basic BoN
+- `bon_local_search.py` - BoN + Local Search
+- `bon_local_search_last_step.py` - BoN + Local Search (last step only)
 
 5. **`diffusion_search.py`**
    - Pass parameter to modifier instantiation
@@ -109,6 +178,14 @@ This will:
 | **Uses model info** | No | Yes (x_theta probabilities) |
 | **Complexity** | O(vocab_size × seq_len) | O(k × seq_len) |
 | **Example** | 50 × 100 = 5,000 | 10 × 100 = 1,000 |
+
+### Comparison: BoN Modes
+
+| Configuration | BoN Property Evaluation | Local Search Property Evaluation | Use Case |
+|---------------|------------------------|----------------------------------|----------|
+| `num_samples=1` | ❌ **SKIPPED** | ✅ Yes | Fast: only local search refinement |
+| `num_samples=16` | ✅ Yes (16 samples) | ✅ Yes | Thorough: both BoN + local search |
+| `num_samples=1, local_search=0` | ❌ **SKIPPED** | ❌ None | Fastest: no properties at all |
 
 ## Performance Tuning
 

@@ -60,7 +60,15 @@ class BoNLocalSearchXThetaModifier(XThetaModifier):
             batch_size, seq_len = batch_shape
             tokenizer = self.tokenizer
 
-            best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
+            # Optimization: Skip BoN selection if only 1 sample (no need to compare)
+            if num_x_theta_samples_keepbest <= 1:
+                # Just take the first (and only) sample without computing properties
+                best_tokens = all_samples[0]  # Shape: [batch_size, seq_len]
+                print("Skipping BoN selection (num_samples=1), using sample directly")
+            else:
+                # Normal BoN: compute properties and select best
+                best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
+            
             old_best_tokens = best_tokens.clone()
 
             # Apply local search

@@ -53,7 +53,7 @@ def parse_arguments():
 
     # X-theta modification parameters
     parser.add_argument('--x_theta_type', type=str, default='standard',
-                       choices=['standard', 'bon', 'bon_localsearch', 'bon_localsearch_laststep'],
+                       choices=['standard', 'bon', 'bon_localsearch', 'bon_localsearch_laststep', 'local_search_language'],
                        help='Type of x_theta modification to apply')
     parser.add_argument('--num_x_theta_samples', type=int, default=32,
                        help='Number of samples for x_theta sampling method')
