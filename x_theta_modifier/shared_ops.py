@@ -1,6 +1,24 @@
 import torch
 from x_theta_modifier.local_search_utils import *
 
+def clean_text_samples(text_samples):
+    """
+    Clean text samples by removing special tokens.
+    This matches the cleaning logic in inference_utils.py.
+    
+    Args:
+        text_samples: List of text strings
+    
+    Returns:
+        List of cleaned text strings
+    """
+    cleaned = []
+    for sample in text_samples:
+        # Remove all special tokens (matching inference_utils.py logic)
+        cleaned_text = sample.replace('<bos>', '').replace('<eos>', '').replace('<pad>', '').replace('<mask>', '').replace('<unk>', '').replace('<cls>', '').replace('<sep>', '').replace('<reserved>', '').strip()
+        cleaned.append(cleaned_text)
+    return cleaned
+
 def gumbel_sample(x_theta, num_samples):
     gumbel_noise = -torch.log(-torch.log(torch.rand(
         (num_samples, *x_theta.shape),
@@ -25,10 +43,38 @@ def compute_properties(smiles_list, property_calcs, distance_funcs):
     ]
     return distances
 
-def compute_combined_distances(smiles_list, batch_size, num_x_theta_samples, property_calcs_parallel, distance_to_bounds_parallel, device):
+def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, property_calcs_parallel, distance_to_bounds_parallel, device, tokenizer):
+    """
+    Compute combined distances for token sequences.
+    
+    IMPORTANT: Follows discrete diffusion output processing:
+    1. Decode token IDs → text (with special tokens)
+    2. Clean text: remove special tokens
+    3. Pass cleaned text to property calculators (they handle encoding internally)
+    
+    Args:
+        token_ids: Token IDs tensor [batch_size * num_x_theta_samples, seq_len]
+        batch_size: Batch size
+        num_x_theta_samples: Number of samples per batch element
+        property_calcs_parallel: List of property calculation functions
+        distance_to_bounds_parallel: List of distance functions
+        device: Device to use
+        tokenizer: Tokenizer for decoding
+    
+    Returns:
+        Stacked distances tensor [batch_size, num_x_theta_samples, num_properties]
+    """
     property_size = batch_size * num_x_theta_samples
+    
+    # Step 1: Decode token IDs to text
+    text_samples = tokenizer.batch_decode(token_ids.cpu().numpy())
+    
+    # Step 2: Clean text by removing special tokens
+    cleaned_texts = clean_text_samples(text_samples)
+    
+    # Step 3: Calculate properties using cleaned text
     property_values = [
-        calc(smiles_list, property_size, device)
+        calc(cleaned_texts, property_size, device)
         for calc in property_calcs_parallel
     ]
     # Apply distance_to_bounds_parallel to property_values
@@ -47,11 +93,9 @@ def compute_combined_distances(smiles_list, batch_size, num_x_theta_samples, pro
 def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel):
     # Reshape samples for score calculation: (batch_size * self.num_x_theta_samples_keepbest, seq_len)
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
-    # Decode SMILES strings from token IDs
-    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
-    # Calculate property values for each function in self.property_calcs_parallel
-
-    combined_distances = compute_combined_distances(smiles_list, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel, device)  # Shape: [batch_size, self.num_x_theta_samples_keepbest, num_properties]
+    
+    # Calculate combined distances (with decode → clean → encode)
+    combined_distances = compute_combined_distances(reshaped_samples, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel, device, tokenizer)  # Shape: [batch_size, self.num_x_theta_samples_keepbest, num_properties]
 
     # combined_distances: [B, N, P] (batch_size, num_samples, num_properties)
     B, N, P = combined_distances.shape

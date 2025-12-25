@@ -7,6 +7,25 @@ import torch
 from properties.property_util import compare_hierarchical
 
 
+def clean_text_samples(text_samples):
+    """
+    Clean text samples by removing special tokens.
+    This matches the cleaning logic in inference_utils.py.
+    
+    Args:
+        text_samples: List of text strings
+    
+    Returns:
+        List of cleaned text strings
+    """
+    cleaned = []
+    for sample in text_samples:
+        # Remove all special tokens (matching inference_utils.py logic)
+        cleaned_text = sample.replace('<bos>', '').replace('<eos>', '').replace('<pad>', '').replace('<mask>', '').replace('<unk>', '').replace('<cls>', '').replace('<sep>', '').replace('<reserved>', '').strip()
+        cleaned.append(cleaned_text)
+    return cleaned
+
+
 def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, device):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
@@ -14,6 +33,12 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     This function processes ALL sequences in the batch together for efficiency.
     Uses parallel property calculation functions for speed.
+    
+    IMPORTANT: Follows discrete diffusion output processing:
+    1. Decode token IDs → text (with special tokens)
+    2. Clean text: remove special tokens
+    3. Encode cleaned text → new token IDs
+    4. Calculate properties on cleaned token IDs
     
     Args:
         best_tokens: Current best sequences (batch_size x seq_len) tensor of token IDs
@@ -29,9 +54,15 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     """
     batch_size, seq_len = best_tokens.shape
     
-    # Calculate properties using token IDs directly (all models use GPT-2 tokenizer)
+    # Step 1: Decode best_tokens to text
+    best_texts = tokenizer.batch_decode(best_tokens.cpu().numpy())
+    
+    # Step 2: Clean text by removing special tokens
+    best_texts_cleaned = clean_text_samples(best_texts)
+    
+    # Step 3: Calculate properties using cleaned text (let property calculators handle encoding)
     best_prop_values = [
-        calc(None, batch_size, device, token_ids=best_tokens)
+        calc(best_texts_cleaned, batch_size, device)
         for calc in property_calcs_parallel
     ]
     
@@ -92,9 +123,15 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     print(f"  Local search: Evaluating all {total_neighbors} neighbors in parallel...")
     
-    # Compute properties using token IDs directly (all models use GPT-2 tokenizer)
+    # Step 1: Decode neighbor_tokens_batch to text
+    neighbor_texts = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy())
+    
+    # Step 2: Clean text by removing special tokens
+    neighbor_texts_cleaned = clean_text_samples(neighbor_texts)
+    
+    # Step 3: Calculate properties using cleaned text (let property calculators handle encoding)
     neighbor_prop_values = [
-        calc(None, total_neighbors, device, token_ids=neighbor_tokens_batch)
+        calc(neighbor_texts_cleaned, total_neighbors, device)
         for calc in property_calcs_parallel
     ]
     

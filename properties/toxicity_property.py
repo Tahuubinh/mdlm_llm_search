@@ -146,17 +146,15 @@ def calculate_toxicity(text, max_length=100):
         return None
 
 
-def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100, token_ids=None):
+def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     """
     Calculate toxicity scores for a batch of sequences in parallel.
     
     Args:
-        sequence_list (list): List of text sequences (used if token_ids is None)
+        sequence_list (list): List of text sequences (already cleaned, no special tokens)
         batch_size (int): Number of sequences in the batch
         device (torch.device): Device to store results
         max_length (int): Maximum token length for model input
-        token_ids (torch.Tensor): Optional pre-tokenized input [batch_size, seq_len]
-                                   If provided, skip decode/encode and use directly
         
     Returns:
         torch.Tensor: Toxicity scores for each sequence
@@ -166,80 +164,31 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100, to
     # Initialize rewards tensor
     rewards = torch.zeros(batch_size, device=device)
     
-    # OPTIMIZATION: Use token_ids directly if provided (skip decode/encode)
-    if token_ids is not None:
-        # Move model to GPU temporarily
-        model.to('cuda')
-        
-        # Process in chunks to avoid OOM
-        chunk_size_gpu = 256
-        all_toxicity_scores = []
-        
-        for chunk_start in tqdm(range(0, batch_size, chunk_size_gpu), desc="Toxicity"):
-            chunk_end = min(chunk_start + chunk_size_gpu, batch_size)
-            chunk_token_ids = token_ids[chunk_start:chunk_end]
-            
-            # Create attention mask (1 for non-pad tokens)
-            pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 50256
-            attention_mask = (chunk_token_ids != pad_token_id).long()
-            
-            input_ids = chunk_token_ids.to('cuda')
-            attention_mask = attention_mask.to('cuda')
-            
-            # Compute toxicity scores for chunk
-            with torch.no_grad():
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-            
-            chunk_scores = outputs['logits'].squeeze(-1).cpu()
-            all_toxicity_scores.append(chunk_scores)
-        
-        # Concatenate all scores
-        toxicity_scores = torch.cat(all_toxicity_scores) if len(all_toxicity_scores) > 1 else all_toxicity_scores[0]
-        
-        # Move model back to CPU
-        model.to('cpu')
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        rewards[:batch_size] = toxicity_scores.to(device)
-        return rewards    # FALLBACK: Original text-based approach
-    # Filter out empty sequences
-    valid_sequences = []
-    valid_indices = []
-    for i, seq in enumerate(sequence_list):
-        if seq and isinstance(seq, str):
-            valid_sequences.append(seq)
-            valid_indices.append(i)
-    
-    if not valid_sequences:
-        return rewards
-    
+    # Text-based approach: encode sequences using tokenizer
     # Move model to GPU temporarily
     model.to('cuda')
     
-    # Process in chunks to avoid OOM when evaluating many neighbors
+    # Process in chunks to avoid OOM
     chunk_size_gpu = 256
     all_toxicity_scores = []
     
-    for chunk_start in tqdm(range(0, len(valid_sequences), chunk_size_gpu), desc="Toxicity"):
-        chunk_end = min(chunk_start + chunk_size_gpu, len(valid_sequences))
-        chunk_sequences = valid_sequences[chunk_start:chunk_end]
-
-        # Tokenize chunk
+    for chunk_start in tqdm(range(0, batch_size, chunk_size_gpu), desc="Toxicity"):
+        chunk_end = min(chunk_start + chunk_size_gpu, batch_size)
+        chunk_sequences = sequence_list[chunk_start:chunk_end]
+        
+        # Tokenize chunk sequences
         inputs = tokenizer(
             chunk_sequences,
-            return_tensors="pt",
+            return_tensors='pt',
             padding=True,
             truncation=True,
             max_length=max_length
-        )
-        input_ids = inputs["input_ids"].to('cuda')
-        attention_mask = inputs["attention_mask"].to('cuda')
-
+        ).to('cuda')
+        
         # Compute toxicity scores for chunk
         with torch.no_grad():
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-
+            outputs = model(**inputs)
+        
         chunk_scores = outputs['logits'].squeeze(-1).cpu()
         all_toxicity_scores.append(chunk_scores)
     
@@ -251,10 +200,7 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100, to
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     
-    # Assign scores to corresponding positions
-    for idx, score in zip(valid_indices, toxicity_scores):
-        rewards[idx] = score.to(device)
-    
+    rewards[:batch_size] = toxicity_scores.to(device)
     return rewards
 
 

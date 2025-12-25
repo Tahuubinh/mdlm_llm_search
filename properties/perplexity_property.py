@@ -108,19 +108,17 @@ def calculate_perplexity(text, model_name='gpt2-large', max_length=512):
         return float('inf')
 
 
-def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2-large', max_length=512, token_ids=None):
+def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2-large', max_length=512):
     """
     Calculate perplexity scores for a batch of sequences in parallel.
     Lower perplexity is better (more fluent text).
     
     Args:
-        sequence_list (list): List of text sequences (used if token_ids is None)
+        sequence_list (list): List of text sequences (already cleaned, no special tokens)
         batch_size (int): Number of sequences in the batch
         device (torch.device): Device to store results
         model_name (str): Name of the GPT-2 model to use
         max_length (int): Maximum token length for model input
-        token_ids (torch.Tensor): Optional pre-tokenized input [batch_size, seq_len]
-                                   If provided, skip decode/encode and use directly
         
     Returns:
         torch.Tensor: Perplexity scores for each sequence
@@ -130,69 +128,6 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
     # Initialize perplexity tensor with infinity (worst score)
     perplexities = torch.full((batch_size,), float('inf'), device=device)
     
-    # OPTIMIZATION: Use token_ids directly if provided (skip decode/encode)
-    if token_ids is not None:
-        # Move model to GPU temporarily
-        model.to('cuda')
-        
-        # Process in chunks to avoid OOM
-        chunk_size_gpu = 128
-        all_perplexities = []
-        
-        for chunk_start in tqdm(range(0, batch_size, chunk_size_gpu), desc="Perplexity"):
-            chunk_end = min(chunk_start + chunk_size_gpu, batch_size)
-            chunk_token_ids = token_ids[chunk_start:chunk_end]
-            
-            # Create attention mask (1 for non-pad tokens)
-            pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
-            attention_mask = (chunk_token_ids != pad_token_id).long()
-            
-            input_ids = chunk_token_ids.to('cuda')
-            attention_mask = attention_mask.to('cuda')
-            
-            # Calculate perplexity scores for chunk
-            with torch.no_grad():
-                outputs = model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    labels=input_ids
-                )
-                
-                # Get per-sample loss
-                logits = outputs.logits
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = input_ids[..., 1:].contiguous()
-                shift_attention_mask = attention_mask[..., 1:].contiguous()
-                
-                # Calculate loss per sample
-                loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-                loss = loss_fct(
-                    shift_logits.view(-1, shift_logits.size(-1)),
-                    shift_labels.view(-1)
-                )
-                loss = loss.view(shift_labels.size())
-                
-                # Apply attention mask and calculate mean loss per sample
-                loss = (loss * shift_attention_mask).sum(dim=1) / shift_attention_mask.sum(dim=1).clamp(min=1)
-                
-                # Convert to perplexity
-                chunk_perplexities = torch.exp(loss).cpu()
-                all_perplexities.append(chunk_perplexities)
-            
-            torch.cuda.empty_cache()
-        
-        # Concatenate all perplexities
-        batch_perplexities = torch.cat(all_perplexities) if len(all_perplexities) > 1 else all_perplexities[0]
-        
-        # Move model back to CPU
-        model.to('cpu')
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-        
-        perplexities[:batch_size] = batch_perplexities.to(device)
-        return perplexities
-    
-    # FALLBACK: Original text-based approach
     # Filter out empty sequences
     valid_sequences = []
     valid_indices = []
