@@ -55,16 +55,32 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
             print(f"Step {step}: Starting batch local search for {batch_size} sequences...")
             x_theta_probs = torch.softmax(x_theta, dim=-1)  # Convert logits to probabilities
             
-            best_tokens = local_search_language_batch(
-                best_tokens=best_tokens,
-                x_theta_probs=x_theta_probs,
-                distance_to_bounds_parallel=self.distance_to_bounds_parallel,
-                property_calcs_parallel=self.property_calcs_parallel,
-                tokenizer=tokenizer,
-                top_k_values_for_local_search=self.top_k_values_for_local_search,
-                device=device
-            )
-            print(f"Step {step}: Local search completed")
+            if (step + 2) % 3 == 0:
+                # CRITICAL: Clear GPU cache before local search to free up memory from diffusion model
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                
+                best_tokens = local_search_language_batch(
+                    best_tokens=best_tokens,
+                    x_theta_probs=x_theta_probs,
+                    distance_to_bounds_parallel=self.distance_to_bounds_parallel,
+                    property_calcs_parallel=self.property_calcs_parallel,
+                    tokenizer=tokenizer,
+                    top_k_values_for_local_search=self.top_k_values_for_local_search,
+                    device=device
+                )
+                print(f"Step {step}: Local search completed")
+
+            # best_tokens = local_search_language_batch(
+            #     best_tokens=best_tokens,
+            #     x_theta_probs=x_theta_probs,
+            #     distance_to_bounds_parallel=self.distance_to_bounds_parallel,
+            #     property_calcs_parallel=self.property_calcs_parallel,
+            #     tokenizer=tokenizer,
+            #     top_k_values_for_local_search=self.top_k_values_for_local_search,
+            #     device=device
+            # )
+            # print(f"Step {step}: Local search completed")
 
             new_x_theta, validity_mask = modify_x_theta(best_tokens, tokenizer, x_theta, batch_size, device)
             if validity_mask is not None and validity_mask.any():

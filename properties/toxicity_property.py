@@ -5,8 +5,9 @@ is loaded only once and reused across all calculations.
 """
 
 import torch
-from transformers import GPT2Tokenizer
+# from transformers import GPT2Tokenizer
 import os
+from tqdm import tqdm
 
 # Singleton pattern for model loading
 _TOXICITY_MODEL = None
@@ -181,10 +182,10 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     chunk_size_gpu = 256  # Process 256 sequences at a time on GPU
     all_toxicity_scores = []
     
-    for chunk_start in range(0, len(valid_sequences), chunk_size_gpu):
+    for chunk_start in tqdm(range(0, len(valid_sequences), chunk_size_gpu), desc="Processing chunks"):
         chunk_end = min(chunk_start + chunk_size_gpu, len(valid_sequences))
         chunk_sequences = valid_sequences[chunk_start:chunk_end]
-        
+
         # Tokenize chunk
         inputs = tokenizer(
             chunk_sequences,
@@ -195,14 +196,14 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
         )
         input_ids = inputs["input_ids"].to('cuda')
         attention_mask = inputs["attention_mask"].to('cuda')
-        
+
         # Compute toxicity scores for chunk
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        
+
         chunk_scores = outputs['logits'].squeeze(-1).cpu()
         all_toxicity_scores.append(chunk_scores)
-        
+
         # Free memory after each chunk (but keep model on GPU)
         del input_ids, attention_mask, outputs, chunk_scores
     

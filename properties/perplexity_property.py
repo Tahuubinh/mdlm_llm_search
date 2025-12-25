@@ -7,6 +7,7 @@ is loaded only once and reused across all calculations.
 import torch
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import math
+from tqdm import tqdm
 
 # Singleton pattern for model loading
 _PERPLEXITY_MODEL = None
@@ -145,7 +146,7 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
     chunk_size_gpu = 256  # Process 256 sequences at a time (perplexity needs more memory)
     all_perplexities = []
     
-    for chunk_start in range(0, len(valid_sequences), chunk_size_gpu):
+    for chunk_start in tqdm(range(0, len(valid_sequences), chunk_size_gpu), desc="Processing chunks"):
         chunk_end = min(chunk_start + chunk_size_gpu, len(valid_sequences))
         chunk_sequences = valid_sequences[chunk_start:chunk_end]
         
@@ -192,6 +193,9 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
         
         # Free memory after each chunk (but keep model on GPU)
         del input_ids, attention_mask, outputs, logits, shift_logits, shift_labels, shift_attention_mask, loss, chunk_perplexities
+        
+        # Clear CUDA cache more aggressively for perplexity due to high memory usage
+        torch.cuda.empty_cache()
     
     # Concatenate all perplexities
     batch_perplexities = torch.cat(all_perplexities) if len(all_perplexities) > 1 else all_perplexities[0]
