@@ -177,32 +177,43 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     # Move model to GPU temporarily
     model.to('cuda')
     
-    # Tokenize all sequences at once
-    inputs = tokenizer(
-        valid_sequences,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        max_length=max_length
-    )
-    input_ids = inputs["input_ids"].to('cuda')
-    attention_mask = inputs["attention_mask"].to('cuda')
+    # Process in chunks to avoid OOM when evaluating many neighbors
+    chunk_size_gpu = 256  # Process 256 sequences at a time on GPU
+    all_toxicity_scores = []
     
-    # Compute toxicity scores in batch
-    with torch.no_grad():
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+    for chunk_start in range(0, len(valid_sequences), chunk_size_gpu):
+        chunk_end = min(chunk_start + chunk_size_gpu, len(valid_sequences))
+        chunk_sequences = valid_sequences[chunk_start:chunk_end]
+        
+        # Tokenize chunk
+        inputs = tokenizer(
+            chunk_sequences,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=max_length
+        )
+        input_ids = inputs["input_ids"].to('cuda')
+        attention_mask = inputs["attention_mask"].to('cuda')
+        
+        # Compute toxicity scores for chunk
+        with torch.no_grad():
+            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        chunk_scores = outputs['logits'].squeeze(-1).cpu()
+        all_toxicity_scores.append(chunk_scores)
+        
+        # Free memory after each chunk (but keep model on GPU)
+        del input_ids, attention_mask, outputs, chunk_scores
     
-    toxicity_scores = outputs['logits'].squeeze(-1).cpu()
+    # Concatenate all scores
+    toxicity_scores = torch.cat(all_toxicity_scores) if len(all_toxicity_scores) > 1 else all_toxicity_scores[0]
+    del all_toxicity_scores
     
-    # Free GPU memory immediately after computation
-    del input_ids, attention_mask, outputs
-    
-    # Move model back to CPU to free GPU memory
+    # CRITICAL: Move model back to CPU AFTER processing all chunks
     model.to('cpu')
-    
-    # Clear CUDA cache to free memory for other operations
     torch.cuda.empty_cache()
-    torch.cuda.synchronize()  # Ensure all operations complete before clearing
+    torch.cuda.synchronize()  # Ensure GPU operations complete
     
     # Assign scores to corresponding positions
     for idx, score in zip(valid_indices, toxicity_scores):

@@ -45,10 +45,17 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     # Stack into [batch_size, num_properties]
     best_distances_tensor = torch.stack(best_distances, dim=-1)
     
+    # Free memory after initial property calculation
+    del best_sequences, best_prop_values, best_distances
+    torch.cuda.empty_cache()
+    
     # Get top-k token indices for each position from x_theta
     # x_theta_probs shape: (batch_size, seq_len, vocab_size)
     topk_values, topk_indices = torch.topk(x_theta_probs, k=top_k_values_for_local_search, dim=-1)
     # topk_indices shape: (batch_size, seq_len, top_k_values_for_local_search)
+    
+    # Free topk_values as we only need indices
+    del topk_values
     
     # Iterate through each rank (1st best, 2nd best, ..., k-th best)
     for k_rank in range(top_k_values_for_local_search):
@@ -66,54 +73,71 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         total_neighbors = is_different.sum().item()
         
         if total_neighbors == 0:
-            # print(f"    No valid neighbors for rank {k_rank+1} (all candidates same as current), skipping...")
+            # Free temporary tensors
+            del candidate_tokens, is_different
             continue
-        
-        # print(f"    Generating {total_neighbors} unique neighbors using vectorized operations...")
-        
-        # Method: For each (batch_idx, pos) pair where is_different[batch_idx, pos] == True,
-        # create a neighbor by copying best_tokens[batch_idx] and changing position pos
         
         # Get indices of all positions that differ
         batch_indices, pos_indices = torch.where(is_different)
         # batch_indices: which batch element, pos_indices: which position
         
+        # Free is_different after use
+        del is_different
+        
         # Create all neighbors at once using advanced indexing
-        # Step 1: Repeat best_tokens for each neighbor we need to create
-        # neighbor_tokens_batch = best_tokens[batch_indices].clone()  # [total_neighbors, seq_len]
         neighbor_tokens_batch = best_tokens[batch_indices].clone()
         
         # Step 2: Get the candidate token for each neighbor
         neighbor_candidate_tokens = candidate_tokens[batch_indices, pos_indices]  # [total_neighbors]
         
+        # Free candidate_tokens after use
+        del candidate_tokens
+        
         # Step 3: Use scatter to place candidate tokens at the correct positions
-        # We need to scatter neighbor_candidate_tokens into neighbor_tokens_batch at positions pos_indices
         neighbor_tokens_batch[torch.arange(total_neighbors), pos_indices] = neighbor_candidate_tokens
         
+        # Free neighbor_candidate_tokens after use
+        del neighbor_candidate_tokens
+        
         # Create metadata for tracking which (batch_idx, pos) each neighbor corresponds to
-        # We'll use this later for updating best_tokens
         all_neighbor_metadata = list(zip(batch_indices.cpu().tolist(), pos_indices.cpu().tolist()))
         
-        # print(f"    Vectorized generation complete: {total_neighbors} neighbors created")
+        # Free batch_indices and pos_indices after use
+        del batch_indices, pos_indices
         
         # Evaluate ALL neighbors in ONE SINGLE batch using PARALLEL property calculation
-        neighbor_sequences = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy(), skip_special_tokens=True)
+        # Decode in chunks to save memory
+        chunk_size = 50  # Decode 50 sequences at a time (reduced from 100)
+        neighbor_sequences = []
+        for i in range(0, total_neighbors, chunk_size):
+            chunk = neighbor_tokens_batch[i:i+chunk_size]
+            chunk_decoded = tokenizer.batch_decode(chunk.cpu().numpy(), skip_special_tokens=True)
+            neighbor_sequences.extend(chunk_decoded)
+            del chunk, chunk_decoded
         
         # Compute properties for ALL neighbors in ONE call (this is the key speedup!)
         neighbor_prop_values = [
             calc(neighbor_sequences, total_neighbors, device)
             for calc in property_calcs_parallel
         ]
+        
+        # Free neighbor_sequences after property calculation
+        del neighbor_sequences
+        
         # Apply distance functions
         neighbor_distances = [
             dist_func(prop_value)
             for dist_func, prop_value in zip(distance_to_bounds_parallel, neighbor_prop_values)
         ]
+        
+        # Free neighbor_prop_values after distance calculation
+        del neighbor_prop_values
+        
         # Stack into [total_neighbors, num_properties]
         neighbor_distances_tensor = torch.stack(neighbor_distances, dim=-1)
         
-        # Free memory for neighbor sequences and intermediate values
-        del neighbor_sequences, neighbor_prop_values, neighbor_distances
+        # Free neighbor_distances after stacking
+        del neighbor_distances
         
         # Update best sequences if neighbors are better
         for i, (batch_idx, pos) in enumerate(all_neighbor_metadata):
@@ -128,13 +152,15 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
             if compare_hierarchical(neighbor_dist_list, best_dist_list) < 0:
                 # Use neighbor_tokens_batch[i] instead of all_neighbor_tokens[i]
                 best_tokens[batch_idx] = neighbor_tokens_batch[i]
-                # Update distances tensor
-                best_distances_tensor[batch_idx] = neighbor_dist
-                # print(f"    Found better sequence for batch {batch_idx} at position {pos}")
+                # Update distances tensor with clone to avoid reference issues
+                best_distances_tensor[batch_idx] = neighbor_dist.clone()
         
         # Clear memory after processing each rank
         del neighbor_tokens_batch, all_neighbor_metadata, neighbor_distances_tensor
         torch.cuda.empty_cache()
+    
+    # Free topk_indices and best_distances_tensor at the end
+    del topk_indices, best_distances_tensor
     
     return best_tokens
 

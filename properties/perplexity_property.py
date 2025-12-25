@@ -141,55 +141,66 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
     # Move model to GPU temporarily
     model.to('cuda')
     
-    # Tokenize all sequences at once
-    encodings = tokenizer(
-        valid_sequences,
-        return_tensors="pt",
-        truncation=True,
-        max_length=max_length,
-        padding=True
-    )
+    # Process in chunks to avoid OOM when evaluating many neighbors
+    chunk_size_gpu = 256  # Process 256 sequences at a time (perplexity needs more memory)
+    all_perplexities = []
     
-    input_ids = encodings["input_ids"].to('cuda')
-    attention_mask = encodings["attention_mask"].to('cuda')
-    
-    # Calculate perplexity scores in batch
-    with torch.no_grad():
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=input_ids
+    for chunk_start in range(0, len(valid_sequences), chunk_size_gpu):
+        chunk_end = min(chunk_start + chunk_size_gpu, len(valid_sequences))
+        chunk_sequences = valid_sequences[chunk_start:chunk_end]
+        
+        # Tokenize chunk
+        encodings = tokenizer(
+            chunk_sequences,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+            padding=True
         )
         
-        # Get per-sample loss
-        logits = outputs.logits
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = input_ids[..., 1:].contiguous()
-        shift_attention_mask = attention_mask[..., 1:].contiguous()
+        input_ids = encodings["input_ids"].to('cuda')
+        attention_mask = encodings["attention_mask"].to('cuda')
         
-        # Calculate loss per sample
-        loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-        loss = loss_fct(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1)
-        )
-        loss = loss.view(shift_labels.size())
+        # Calculate perplexity scores for chunk
+        with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=input_ids
+            )
+            
+            # Get per-sample loss
+            logits = outputs.logits
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = input_ids[..., 1:].contiguous()
+            shift_attention_mask = attention_mask[..., 1:].contiguous()
+            
+            # Calculate loss per sample
+            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            loss = loss_fct(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1)
+            )
+            loss = loss.view(shift_labels.size())
+            
+            # Apply attention mask and calculate mean loss per sample
+            loss = (loss * shift_attention_mask).sum(dim=1) / shift_attention_mask.sum(dim=1)
+            
+            # Convert to perplexity
+            chunk_perplexities = torch.exp(loss).cpu()
+            all_perplexities.append(chunk_perplexities)
         
-        # Apply attention mask and calculate mean loss per sample
-        loss = (loss * shift_attention_mask).sum(dim=1) / shift_attention_mask.sum(dim=1)
-        
-        # Convert to perplexity
-        batch_perplexities = torch.exp(loss).cpu()
+        # Free memory after each chunk (but keep model on GPU)
+        del input_ids, attention_mask, outputs, logits, shift_logits, shift_labels, shift_attention_mask, loss, chunk_perplexities
     
-    # Free GPU memory immediately after computation
-    del input_ids, attention_mask, outputs, logits, shift_logits, shift_labels, shift_attention_mask, loss
+    # Concatenate all perplexities
+    batch_perplexities = torch.cat(all_perplexities) if len(all_perplexities) > 1 else all_perplexities[0]
+    del all_perplexities
     
-    # Move model back to CPU to free GPU memory
+    # CRITICAL: Move model back to CPU AFTER processing all chunks
     model.to('cpu')
-    
-    # Clear CUDA cache to free memory for other operations
     torch.cuda.empty_cache()
-    torch.cuda.synchronize()  # Ensure all operations complete before clearing
+    torch.cuda.synchronize()  # Ensure GPU operations complete
     
     # Assign scores to corresponding positions
     for idx, ppl in zip(valid_indices, batch_perplexities):
