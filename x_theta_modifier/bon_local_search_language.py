@@ -39,26 +39,31 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
             batch_size, seq_len = batch_shape
             tokenizer = self.tokenizer
 
-            # Optimization: Skip BoN selection if only 1 sample (no need to compare)
-            if num_x_theta_samples_keepbest <= 1:
-                # Just take the first (and only) sample without computing properties
+            # step_to_begin_local_search = 100
+            # Only compute properties (BoN + Local Search) for late steps
+            if step % 10 != 0:
+                # Early steps: just take first sample without property computation
                 best_tokens = all_samples[0]  # Shape: [batch_size, seq_len]
-                # print(f"Step {step}: Skipping BoN (num_samples=1), proceeding to local search")
             else:
-                # Normal BoN: compute properties and select best
-                # print(f"Step {step}: BoN selection from {num_x_theta_samples_keepbest} samples")
-                best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
+                # Late steps: perform BoN selection + local search
+                # Optimization: Skip BoN selection if only 1 sample (no need to compare)
+                if num_x_theta_samples_keepbest <= 1:
+                    # Just take the first (and only) sample without computing properties
+                    best_tokens = all_samples[0]  # Shape: [batch_size, seq_len]
+                    old_best_tokens = best_tokens.clone()
+                else:
+                    # Normal BoN: compute properties and select best
+                    print(f"Step {step}: BoN selection from {num_x_theta_samples_keepbest} samples")
+                    best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
             
-            old_best_tokens = best_tokens.clone()
+                    old_best_tokens = best_tokens.clone()
 
-            # Apply language-specific batch local search
-            print(f"Step {step}: Starting batch local search for {batch_size} sequences...")
-            x_theta_probs = torch.softmax(x_theta, dim=-1)  # Convert logits to probabilities
-            
-            if (step + 2) % 3 == 0:
+                # Apply language-specific batch local search
+                print(f"Step {step}: Starting batch local search for {batch_size} sequences...")
+                x_theta_probs = torch.softmax(x_theta, dim=-1)  # Convert logits to probabilities
                 # CRITICAL: Clear GPU cache before local search to free up memory from diffusion model
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+                # torch.cuda.empty_cache()
+                # torch.cuda.synchronize()
                 
                 best_tokens = local_search_language_batch(
                     best_tokens=best_tokens,
@@ -71,6 +76,9 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                 )
                 print(f"Step {step}: Local search completed")
 
+            # # Apply language-specific batch local search
+            # print(f"Step {step}: Starting batch local search for {batch_size} sequences...")
+            # x_theta_probs = torch.softmax(x_theta, dim=-1)  # Convert logits to probabilities
             # best_tokens = local_search_language_batch(
             #     best_tokens=best_tokens,
             #     x_theta_probs=x_theta_probs,
