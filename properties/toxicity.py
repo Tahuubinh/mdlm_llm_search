@@ -65,7 +65,7 @@ def load_model(path):
 
 if __name__ == "__main__":
     model_path = 'outputs/toxicity/classifier/toxicity_gpt2_neo.pt'
-    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/bon/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test/seed_0/molecules/"
+    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/local_search_language/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test1/seed_0/molecules/"
 
     # Load the model
     model = load_model(model_path)

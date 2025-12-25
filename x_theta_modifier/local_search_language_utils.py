@@ -112,6 +112,9 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         # Stack into [total_neighbors, num_properties]
         neighbor_distances_tensor = torch.stack(neighbor_distances, dim=-1)
         
+        # Free memory for neighbor sequences and intermediate values
+        del neighbor_sequences, neighbor_prop_values, neighbor_distances
+        
         # Update best sequences if neighbors are better
         for i, (batch_idx, pos) in enumerate(all_neighbor_metadata):
             neighbor_dist = neighbor_distances_tensor[i]  # [num_properties]
@@ -128,6 +131,10 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
                 # Update distances tensor
                 best_distances_tensor[batch_idx] = neighbor_dist
                 # print(f"    Found better sequence for batch {batch_idx} at position {pos}")
+        
+        # Clear memory after processing each rank
+        del neighbor_tokens_batch, all_neighbor_metadata, neighbor_distances_tensor
+        torch.cuda.empty_cache()
     
     return best_tokens
 

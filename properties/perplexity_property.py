@@ -92,9 +92,13 @@ def calculate_perplexity(text, model_name='gpt2-large', max_length=512):
         
         ppl = math.exp(nll)
         
+        # Free GPU memory immediately
+        del input_ids, attention_mask, outputs
+        
         # Move model back to CPU
         model.to('cpu')
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
         
         return ppl
     
@@ -177,9 +181,15 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
         # Convert to perplexity
         batch_perplexities = torch.exp(loss).cpu()
     
+    # Free GPU memory immediately after computation
+    del input_ids, attention_mask, outputs, logits, shift_logits, shift_labels, shift_attention_mask, loss
+    
     # Move model back to CPU to free GPU memory
     model.to('cpu')
+    
+    # Clear CUDA cache to free memory for other operations
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()  # Ensure all operations complete before clearing
     
     # Assign scores to corresponding positions
     for idx, ppl in zip(valid_indices, batch_perplexities):

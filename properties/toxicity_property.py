@@ -130,9 +130,13 @@ def calculate_toxicity(text, max_length=100):
         
         toxicity_score = outputs['logits'].cpu().item()
         
+        # Free GPU memory immediately
+        del input_ids, attention_mask, outputs
+        
         # Move model back to CPU
         model.to('cpu')
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
         
         return toxicity_score
     
@@ -190,9 +194,15 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     
     toxicity_scores = outputs['logits'].squeeze(-1).cpu()
     
+    # Free GPU memory immediately after computation
+    del input_ids, attention_mask, outputs
+    
     # Move model back to CPU to free GPU memory
     model.to('cpu')
+    
+    # Clear CUDA cache to free memory for other operations
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()  # Ensure all operations complete before clearing
     
     # Assign scores to corresponding positions
     for idx, score in zip(valid_indices, toxicity_scores):
