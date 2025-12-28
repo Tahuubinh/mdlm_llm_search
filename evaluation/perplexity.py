@@ -106,7 +106,7 @@ def calculate_perplexity_batch(model, tokenizer, texts, device, batch_size=50):
 
 if __name__ == "__main__":
     # Configuration
-    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/local_search_language/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test5_80/seed_0/molecules/"
+    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/local_search_language/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test_top_1_to_5_every10/seed_0/molecules/"
     num_samples = 8
     batch_size = 8
     

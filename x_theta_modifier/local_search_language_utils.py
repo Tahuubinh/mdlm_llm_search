@@ -86,7 +86,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     all_neighbor_tokens = []
     all_neighbor_metadata = []
     
-    for k_rank in range(top_k_values_for_local_search):
+    for k_rank in range(1, top_k_values_for_local_search):
         # Extract candidate tokens for this rank: [batch_size, seq_len]
         candidate_tokens = topk_indices[:, :, k_rank]  # Shape: [batch_size, seq_len]
         
