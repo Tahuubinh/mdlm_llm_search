@@ -6,6 +6,7 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import os
 import math
 import numpy as np
+import argparse
 
 
 def load_gpt2_model(model_name='gpt2-large'):
@@ -105,23 +106,33 @@ def calculate_perplexity_batch(model, tokenizer, texts, device, batch_size=50):
 
 
 if __name__ == "__main__":
-    # Configuration
-    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/local_search_language/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test_top_1_to_5_every10/seed_0/molecules/"
-    num_samples = 8
-    batch_size = 8
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Evaluate perplexity of generated text samples")
+    parser.add_argument('--output_sequence_dir', type=str, required=True,
+                       help='Directory containing the generated text files')
+    parser.add_argument('--start_sample_index', type=int, default=0,
+                       help='Starting index for sample evaluation (default: 0)')
+    parser.add_argument('--num_samples', type=int, required=True,
+                       help='Number of samples to evaluate')
+    parser.add_argument('--batch_size', type=int, default=8,
+                       help='Batch size for evaluation (default: 8)')
+    parser.add_argument('--model_name', type=str, default='gpt2-large',
+                       help='GPT-2 model name (default: gpt2-large)')
     
-    # Load GPT-2 model (using 'gpt2-large' as per the paper)
+    args = parser.parse_args()
+    
+    # Load GPT-2 model
     print("Loading GPT-2 model...")
-    model, tokenizer, device = load_gpt2_model('gpt2-large')
+    model, tokenizer, device = load_gpt2_model(args.model_name)
     print("Model loaded successfully!\n")
     
     # Read all text files
-    print(f"Reading {num_samples} files...")
+    print(f"Reading {args.num_samples} files from index {args.start_sample_index}...")
     texts = []
     valid_indices = []
     
-    for i in range(num_samples):
-        file_path = os.path.join(output_sequence_dir, f"{i}.txt")
+    for i in range(args.start_sample_index, args.start_sample_index + args.num_samples):
+        file_path = os.path.join(args.output_sequence_dir, f"{i}.txt")
         
         if not os.path.exists(file_path):
             print(f"Warning: File {file_path} does not exist.")
@@ -138,41 +149,41 @@ if __name__ == "__main__":
     # Calculate perplexity for all samples - USE SIMPLE METHOD (one at a time)
     print("Calculating perplexities...")
     perplexities = []
-    for i, text in enumerate(texts):
+    file_indices = list(range(args.start_sample_index, args.start_sample_index + args.num_samples))
+    for idx, text in zip(file_indices, texts):
         if text:
             ppl = calculate_perplexity(model, tokenizer, text, device)
             perplexities.append(ppl)
-            if i < 10:  # Print first 10 for debugging
-                print(f"Sample {i}: Perplexity = {ppl:.4f}, Text length = {len(text.split())} words")
+            if idx < args.start_sample_index + 10:  # Print first 10 for debugging
+                print(f"Sample {idx}: Perplexity = {ppl:.4f}, Text length = {len(text.split())} words")
         else:
             perplexities.append(float('inf'))
     
     # Filter out invalid perplexities (from empty texts)
-    valid_perplexities = [perplexities[i] for i in valid_indices]
+    valid_perplexities = [perplexities[i - args.start_sample_index] for i in valid_indices]
     
     # Print results for each file
     print("\n" + "="*80)
     print("PERPLEXITY RESULTS")
     print("="*80)
     
-    for i in range(num_samples):
-        file_path = os.path.join(output_sequence_dir, f"{i}.txt")
-        ppl = perplexities[i]
+    for idx, text, ppl in zip(file_indices, texts, perplexities):
+        file_path = os.path.join(args.output_sequence_dir, f"{idx}.txt")
         
-        if not texts[i]:
-            print(f"File {i}: EMPTY - Perplexity: N/A")
+        if not text:
+            print(f"File {idx}: EMPTY - Perplexity: N/A")
         else:
-            print(f"File {i}: Perplexity = {ppl:.4f}")
-            print(f"  Text preview: {texts[i][:100]}...")
+            print(f"File {idx}: Perplexity = {ppl:.4f}")
+            print(f"  Text preview: {text[:100]}...")
             print("---")
     
     # Calculate and print statistics
     print("\n" + "="*80)
     print("SUMMARY STATISTICS")
     print("="*80)
-    print(f"Total files: {num_samples}")
+    print(f"Total files: {args.num_samples}")
     print(f"Valid files: {len(valid_indices)}")
-    print(f"Empty files: {num_samples - len(valid_indices)}")
+    print(f"Empty files: {args.num_samples - len(valid_indices)}")
     
     if valid_perplexities:
         print(f"\nPerplexity Statistics:")

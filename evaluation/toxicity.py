@@ -5,6 +5,7 @@ from transformers import GPTNeoForCausalLM, GPT2Tokenizer
 from torch import nn
 import torch.nn.functional as F
 import os
+import argparse
 
 
 # Set up the tokenizer
@@ -64,21 +65,31 @@ def load_model(path):
     return model
 
 if __name__ == "__main__":
-    model_path = 'outputs/toxicity/classifier/toxicity_gpt2_neo.pt'
-    output_sequence_dir = "sample_results/openwebtext-split/topk_all_nucleus_all/standard/local_search_language/['toxicity', 'perplexity']_lb[-100.0, -100.0]_ub[0.75, 0.0]/test_top_1_to_5_every10/seed_0/molecules/"
-
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Evaluate toxicity of generated text samples")
+    parser.add_argument('--output_sequence_dir', type=str, required=True,
+                       help='Directory containing the generated text files')
+    parser.add_argument('--start_sample_index', type=int, default=0,
+                       help='Starting index for sample evaluation (default: 0)')
+    parser.add_argument('--num_samples', type=int, required=True,
+                       help='Number of samples to evaluate')
+    parser.add_argument('--batch_size', type=int, default=8,
+                       help='Batch size for evaluation (default: 8)')
+    parser.add_argument('--model_path', type=str, default='outputs/toxicity/classifier/toxicity_gpt2_neo.pt',
+                       help='Path to the toxicity classifier model (default: outputs/toxicity/classifier/toxicity_gpt2_neo.pt)')
+    parser.add_argument('--tau', type=float, default=0.75,
+                       help='Toxicity threshold (default: 0.75)')
+    
+    args = parser.parse_args()
+    
     # Load the model
-    model = load_model(model_path)
-    tau = 0.75
-
-    num_samples = 8
-    batch_size = 8
+    model = load_model(args.model_path)
 
     # Process files in batches
     total_toxic = 0
-    for batch_start in range(0, num_samples, batch_size):
-        batch_end = min(batch_start + batch_size, num_samples)
-        file_paths = [os.path.join(output_sequence_dir, f"{i}.txt") for i in range(batch_start, batch_end)]
+    for batch_start in range(args.start_sample_index, args.start_sample_index + args.num_samples, args.batch_size):
+        batch_end = min(batch_start + args.batch_size, args.start_sample_index + args.num_samples)
+        file_paths = [os.path.join(args.output_sequence_dir, f"{i}.txt") for i in range(batch_start, batch_end)]
 
         # Read and tokenize all files in the batch
         texts = []
@@ -102,7 +113,7 @@ if __name__ == "__main__":
 
         # Count files with toxicity > tau in this batch
         toxicity_scores = outputs['logits'].cpu().numpy().flatten()  # Ensure 1D array
-        num_toxic = sum(score > tau for score in toxicity_scores)
+        num_toxic = sum(score > args.tau for score in toxicity_scores)
         total_toxic += num_toxic
 
         # Print the results for each file in the batch
@@ -114,5 +125,5 @@ if __name__ == "__main__":
             print("---")
 
     # Print the overall percentage of toxic files
-    toxicity_percentage = (total_toxic / num_samples) * 100
-    print(f"Percentage of files with toxicity > {tau}: {toxicity_percentage:.2f}%")
+    toxicity_percentage = (total_toxic / args.num_samples) * 100
+    print(f"Percentage of files with toxicity > {args.tau}: {toxicity_percentage:.2f}%")

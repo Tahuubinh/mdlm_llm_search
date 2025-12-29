@@ -9,15 +9,17 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
     Uses batch processing and model's x_theta probabilities to guide search.
     """
     
-    def __init__(self, top_k_values_for_local_search=10, *args, **kwargs):
+    def __init__(self, top_k_values_for_local_search=10, local_search_sampling_method='top_p', *args, **kwargs):
         """Initialize the BoN Local Search sampler for language.
         
         Args:
             top_k_values_for_local_search: Number of top-k tokens to try per position
+            local_search_sampling_method: Sampling method ('top_p' or 'locally_typical')
         """
         super().__init__(*args, **kwargs)
         self.top_k_values_for_local_search = top_k_values_for_local_search
-        print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}")
+        self.local_search_sampling_method = local_search_sampling_method
+        print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}")
 
     def get_x_theta_method(self):
         modify_x_theta = modify_x_theta_no_condition
@@ -41,7 +43,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
 
             # step_to_begin_local_search = 100
             # Only compute properties (BoN + Local Search) for late steps
-            if step % 10 != 0:
+            if step % 1 != 0:
                 # Early steps: just take first sample without property computation
                 best_tokens = all_samples[0]  # Shape: [batch_size, seq_len]
             else:
@@ -72,6 +74,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     property_calcs_parallel=self.property_calcs_parallel,
                     tokenizer=tokenizer,
                     top_k_values_for_local_search=self.top_k_values_for_local_search,
+                    sampling_method=self.local_search_sampling_method,
                     device=device
                 )
                 print(f"Step {step}: Local search completed")

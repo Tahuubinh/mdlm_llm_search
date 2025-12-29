@@ -7,6 +7,51 @@ import torch
 from properties.property_util import compare_hierarchical
 
 
+def select_top_k_tokens(x_theta_probs, top_k, method='top_p'):
+    """
+    Select top-k token indices from probability distribution.
+    
+    Args:
+        x_theta_probs: Probability distribution (batch_size, seq_len, vocab_size)
+        top_k: Number of tokens to select
+        method: Selection method - 'top_p' or 'locally_typical'
+    
+    Returns:
+        topk_indices: Tensor of shape (batch_size, seq_len, top_k) with selected token indices
+    """
+    if method == 'top_p':
+        # Default: Select tokens with highest probabilities
+        topk_values, topk_indices = torch.topk(x_theta_probs, k=top_k, dim=-1)
+        return topk_indices
+    
+    elif method == 'locally_typical':
+        # Locally Typical Sampling:
+        # 1. Calculate entropy H of the distribution
+        # 2. For each token, calculate distance between -log(p) and H
+        # 3. Select top-k tokens with smallest distance
+        
+        # Calculate entropy H for each position: H = -sum(p * log(p))
+        # Add small epsilon to avoid log(0)
+        epsilon = 1e-10
+        log_probs = torch.log(x_theta_probs + epsilon)
+        entropy = -torch.sum(x_theta_probs * log_probs, dim=-1, keepdim=True)  # (batch_size, seq_len, 1)
+        
+        # Calculate -log(p) for each token
+        neg_log_probs = -log_probs  # (batch_size, seq_len, vocab_size)
+        
+        # Calculate distance: |(-log(p)) - H|
+        distance_to_entropy = torch.abs(neg_log_probs - entropy)  # (batch_size, seq_len, vocab_size)
+        
+        # Select top-k tokens with SMALLEST distance (closest to entropy)
+        # Use topk with largest=False to get smallest values
+        _, topk_indices = torch.topk(distance_to_entropy, k=top_k, dim=-1, largest=False)
+        
+        return topk_indices
+    
+    else:
+        raise ValueError(f"Unknown sampling method: {method}. Choose 'top_p' or 'locally_typical'")
+
+
 def clean_text_samples(text_samples):
     """
     Clean text samples by removing special tokens.
@@ -26,7 +71,7 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, device):
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -37,8 +82,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     IMPORTANT: Follows discrete diffusion output processing:
     1. Decode token IDs → text (with special tokens)
     2. Clean text: remove special tokens
-    3. Encode cleaned text → new token IDs
-    4. Calculate properties on cleaned token IDs
+    3. Pass cleaned text to property calculators (they handle encoding internally)
     
     Args:
         best_tokens: Current best sequences (batch_size x seq_len) tensor of token IDs
@@ -47,6 +91,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         property_calcs_parallel: List of property calculation functions (parallel version)
         tokenizer: Tokenizer for decoding sequences
         top_k_values_for_local_search: Number of top-k values to try per position
+        sampling_method: Selection method - 'top_p' (highest probability) or 'locally_typical' (closest to entropy)
         device: Device to use
     
     Returns:
@@ -74,19 +119,19 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     # Stack into [batch_size, num_properties]
     best_distances_tensor = torch.stack(best_distances, dim=-1)
     
-    # Get top-k token indices for each position from x_theta
+    # Get top-k token indices for each position from x_theta using specified sampling method
     # x_theta_probs shape: (batch_size, seq_len, vocab_size)
-    topk_values, topk_indices = torch.topk(x_theta_probs, k=top_k_values_for_local_search, dim=-1)
+    topk_indices = select_top_k_tokens(x_theta_probs, top_k_values_for_local_search, method=sampling_method)
     # topk_indices shape: (batch_size, seq_len, top_k_values_for_local_search)
     
-    print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens in parallel...")
+    print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' sampling in parallel...")
     
     # FULLY VECTORIZED neighbor generation across ALL ranks at once!
     # Generate neighbors for ALL ranks simultaneously
     all_neighbor_tokens = []
     all_neighbor_metadata = []
     
-    for k_rank in range(1, top_k_values_for_local_search):
+    for k_rank in range(0, top_k_values_for_local_search):
         # Extract candidate tokens for this rank: [batch_size, seq_len]
         candidate_tokens = topk_indices[:, :, k_rank]  # Shape: [batch_size, seq_len]
         

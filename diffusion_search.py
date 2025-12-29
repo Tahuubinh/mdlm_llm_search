@@ -175,6 +175,7 @@ class Diffusion(L.LightningModule):
     x_theta_num_local_searches = getattr(config.sampling, 'x_theta_num_local_searches')
     max_candidate_tokens = getattr(config.sampling, 'max_candidate_tokens')
     top_k_values_for_local_search = getattr(config.sampling, 'top_k_values_for_local_search', 10)  # Default to 10 if not set
+    local_search_sampling_method = getattr(config.sampling, 'local_search_sampling_method', 'top_p')  # Default to 'top_p' if not set
 
     sampler = SAMPLING_METHOD_CLASSES[self.posterior_sampling_method](
         num_posterior_samples=num_posterior_samples,
@@ -209,6 +210,7 @@ class Diffusion(L.LightningModule):
         vocab_size=self.vocab_size,
         mask_index=self.mask_index,
         top_k_values_for_local_search=top_k_values_for_local_search,
+        local_search_sampling_method=local_search_sampling_method,
     )
     self._modify_x_theta = x_theta_modifier.get_x_theta_method()
 

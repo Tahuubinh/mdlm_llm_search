@@ -62,10 +62,15 @@ def parse_arguments():
     parser.add_argument("--max_candidate_tokens", type=int, default=1000, help="Number of candidate tokens for local search")
     parser.add_argument("--top_k_values_for_local_search", type=int, default=10, 
                        help="For language data: number of top-k tokens to try per position in local search")
+    parser.add_argument("--local_search_sampling_method", type=str, default="top_p", 
+                       choices=["top_p", "locally_typical"],
+                       help="Sampling method for local search: 'top_p' (highest probability) or 'locally_typical' (closest to entropy)")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',
                        help='Directory containing prefix text files for toxicity generation')
+    parser.add_argument('--start_sample_index', type=int, default=0,
+                       help='Starting index for prefix file selection (e.g., 10 to start from 10.txt)')
 
     return parser.parse_args()
 
@@ -113,7 +118,7 @@ def main():
         checkpoint_path = 'outputs/toxicity/mdlm/best.ckpt'
         tokenizer_name_or_path = 'gpt2'
         sequence_length = 100
-        diffusion_steps = 1000  # Can adjust this
+        diffusion_steps = 100  # Can adjust this
 
     
     # Generate molecules
@@ -135,6 +140,7 @@ def main():
         posterior_sampling_config=posterior_sampling_config,
         x_theta_config=x_theta_config,
         prefix_dir=args.prefix_dir if data == 'openwebtext-split' else None,
+        start_sample_index=args.start_sample_index,
         seed=args.seed
     )
     end_time = time.time()
@@ -163,12 +169,16 @@ def main():
         from inference_utils import load_toxicity_prefixes
         
         gpt2_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-        prefixes = load_toxicity_prefixes(args.prefix_dir, gpt2_tokenizer, max_prefixes=args.num_samples)
+        prefixes = load_toxicity_prefixes(args.prefix_dir, gpt2_tokenizer, max_prefixes=args.num_samples, start_index=args.start_sample_index)
         
         # Save each output as separate file (post-prefix only)
+        # File index matches prefix index (e.g., if start_sample_index=10, saves as 10.txt, 11.txt, ...)
         molecules_dir = f"{mol_folder}/molecules"
         os.makedirs(molecules_dir, exist_ok=True)
         for i, mol in enumerate(molecules):
+            # Calculate the actual file index based on start_sample_index
+            file_idx = args.start_sample_index + i
+            
             # Get the prefix text for this sample
             if i < len(prefixes):
                 prefix_text = prefixes[i][0]
@@ -181,15 +191,18 @@ def main():
             else:
                 post_prefix_text = mol
             
-            mol_file_path = f"{molecules_dir}/{i}.txt"
+            mol_file_path = f"{molecules_dir}/{file_idx}.txt"
             with open(mol_file_path, 'w') as f:
                 f.write(post_prefix_text)
-        print(f"\nGenerated molecules (post-prefix only) saved to: {molecules_dir}/ ({len(molecules)} files)")
+        print(f"\nGenerated molecules (post-prefix only) saved to: {molecules_dir}/ ({len(molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(molecules) - 1})")
         
         # Save raw molecules (post-prefix only)
         raw_molecules_dir = f"{mol_folder}/raw_molecules"
         os.makedirs(raw_molecules_dir, exist_ok=True)
         for i, mol in enumerate(raw_molecules):
+            # Calculate the actual file index based on start_sample_index
+            file_idx = args.start_sample_index + i
+            
             # Get the prefix text for this sample
             if i < len(prefixes):
                 prefix_text = prefixes[i][0]
@@ -202,10 +215,10 @@ def main():
             else:
                 post_prefix_text = mol
             
-            raw_mol_file_path = f"{raw_molecules_dir}/{i}.txt"
+            raw_mol_file_path = f"{raw_molecules_dir}/{file_idx}.txt"
             with open(raw_mol_file_path, 'w') as f:
                 f.write(post_prefix_text)
-        print(f"\nGenerated raw molecules (post-prefix only) saved to: {raw_molecules_dir}/ ({len(raw_molecules)} files)")
+        print(f"\nGenerated raw molecules (post-prefix only) saved to: {raw_molecules_dir}/ ({len(raw_molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(raw_molecules) - 1})")
     else:
         # For other data types, save all to single file
         mol_file = f"{mol_folder}/molecules.txt"

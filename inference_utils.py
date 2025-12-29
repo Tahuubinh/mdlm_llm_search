@@ -99,6 +99,7 @@ def setup_config_no_guidance(data, sequence_length, diffusion_steps, checkpoint_
             'x_theta_num_local_searches': x_theta_config.get('num_local_searches'),
             'max_candidate_tokens': x_theta_config.get('max_candidate_tokens'),
             'top_k_values_for_local_search': x_theta_config.get('top_k_values_for_local_search'),
+            'local_search_sampling_method': x_theta_config.get('local_search_sampling_method', 'top_p'),
         },
         
         # Training config (needed even for inference)
@@ -174,7 +175,8 @@ def create_x_theta_config(args):
             'lower_bound': args.lower_bound,
             'upper_bound': args.upper_bound,
             'max_candidate_tokens': args.max_candidate_tokens,
-            'top_k_values_for_local_search': args.top_k_values_for_local_search
+            'top_k_values_for_local_search': args.top_k_values_for_local_search,
+            'local_search_sampling_method': args.local_search_sampling_method
         }
 
 def create_posterior_sampling_config(args):
@@ -193,13 +195,14 @@ def create_posterior_sampling_config(args):
             'none_distances': args.none_distances
         }  # Standard method doesn't need special config
 
-def load_toxicity_prefixes(prefix_dir, tokenizer, max_prefixes=None):
+def load_toxicity_prefixes(prefix_dir, tokenizer, max_prefixes=None, start_index=0):
     """Load prefix texts from directory and tokenize them.
     
     Args:
         prefix_dir: Directory containing .txt files with prefixes
         tokenizer: Tokenizer to use for encoding
         max_prefixes: Maximum number of prefixes to load (None for all)
+        start_index: Starting index for file selection (default: 0)
         
     Returns:
         List of tuples: [(prefix_text, prefix_token_ids), ...]
@@ -207,8 +210,14 @@ def load_toxicity_prefixes(prefix_dir, tokenizer, max_prefixes=None):
     prefix_files = sorted([f for f in os.listdir(prefix_dir) if f.endswith('.txt')],
                          key=lambda x: int(x.split('.')[0]))
     
+    # Apply start_index and max_prefixes slicing
+    if start_index > 0:
+        prefix_files = prefix_files[start_index:]
+    
     if max_prefixes:
         prefix_files = prefix_files[:max_prefixes]
+    
+    print(f"Loading {len(prefix_files)} prefixes starting from index {start_index}")
     
     prefixes = []
     for filename in prefix_files:
@@ -222,7 +231,7 @@ def load_toxicity_prefixes(prefix_dir, tokenizer, max_prefixes=None):
     
     return prefixes
 
-def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_samples=100, batch_size=16, checkpoint_path=None, tokenizer_name_or_path=None, argmax_mode='none', posterior_sampling_config=None, x_theta_config=None, prefix_dir=None, seed=42):
+def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_samples=100, batch_size=16, checkpoint_path=None, tokenizer_name_or_path=None, argmax_mode='none', posterior_sampling_config=None, x_theta_config=None, prefix_dir=None, start_sample_index=0, seed=42):
     """
     Generate molecules using the pre-trained UDLM model from local checkpoint without guidance
     
@@ -233,6 +242,7 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
         argmax_mode: When to use argmax sampling ('none', 'last_step', 'all_steps')
         posterior_sampling_config: Configuration for posterior sampling method
         prefix_dir: Directory containing prefix files (for toxicity generation)
+        start_sample_index: Starting index for prefix file selection (default: 0)
         seed: Random seed for reproducibility
     """
     
@@ -246,9 +256,10 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
     prefixes = None
     if data == 'openwebtext-split' and prefix_dir:
         print(f"Loading toxicity prefixes from: {prefix_dir}")
+        print(f"Starting from sample index: {start_sample_index}, generating {num_samples} samples")
         # Load tokenizer first to tokenize prefixes
         gpt2_tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-        prefixes = load_toxicity_prefixes(prefix_dir, gpt2_tokenizer, max_prefixes=num_samples)
+        prefixes = load_toxicity_prefixes(prefix_dir, gpt2_tokenizer, max_prefixes=num_samples, start_index=start_sample_index)
         print(f"Loaded {len(prefixes)} prefixes")
         # Update num_samples to match number of prefixes
         num_samples = len(prefixes)
