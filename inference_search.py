@@ -65,6 +65,8 @@ def parse_arguments():
     parser.add_argument("--local_search_sampling_method", type=str, default="top_p", 
                        choices=["top_p", "locally_typical"],
                        help="Sampling method for local search: 'top_p' (highest probability) or 'locally_typical' (closest to entropy)")
+    parser.add_argument("--locally_typical_alpha", type=float, default=0.0,
+                       help="Weight for probability bias in locally_typical sampling (0.0 = pure locally typical, >0 = bias toward high prob, default: 0.0)")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',
@@ -160,7 +162,7 @@ def main():
     elif "localsearch" in x_theta_type:
         folder_name_suffix = f"{posterior_sampling_method}/{x_theta_type}_{args.x_theta_num_local_searches}_{max_candidate_tokens}/{property_type}_lb{lower_bound}_ub{upper_bound}"
 
-    mol_folder = f"{output_folder}/{folder_name_suffix}/{args.version}/seed_{args.seed}"
+    mol_folder = f"{output_folder}/{folder_name_suffix}/{args.local_search_sampling_method}/{args.locally_typical_alpha}/{args.version}/seed_{args.seed}"
 
     # Save molecules based on data type
     if data == 'openwebtext-split':

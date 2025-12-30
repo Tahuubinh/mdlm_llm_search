@@ -9,17 +9,19 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
     Uses batch processing and model's x_theta probabilities to guide search.
     """
     
-    def __init__(self, top_k_values_for_local_search=10, local_search_sampling_method='top_p', *args, **kwargs):
+    def __init__(self, top_k_values_for_local_search=10, local_search_sampling_method='top_p', locally_typical_alpha=0.0, *args, **kwargs):
         """Initialize the BoN Local Search sampler for language.
         
         Args:
             top_k_values_for_local_search: Number of top-k tokens to try per position
             local_search_sampling_method: Sampling method ('top_p' or 'locally_typical')
+            locally_typical_alpha: Weight for probability bias in locally_typical (0.0 = pure locally typical, >0 = bias toward high prob)
         """
         super().__init__(*args, **kwargs)
         self.top_k_values_for_local_search = top_k_values_for_local_search
         self.local_search_sampling_method = local_search_sampling_method
-        print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}")
+        self.locally_typical_alpha = locally_typical_alpha
+        print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha}")
 
     def get_x_theta_method(self):
         modify_x_theta = modify_x_theta_no_condition
@@ -75,6 +77,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     tokenizer=tokenizer,
                     top_k_values_for_local_search=self.top_k_values_for_local_search,
                     sampling_method=self.local_search_sampling_method,
+                    locally_typical_alpha=self.locally_typical_alpha,
                     device=device
                 )
                 print(f"Step {step}: Local search completed")

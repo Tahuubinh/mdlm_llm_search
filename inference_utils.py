@@ -100,6 +100,7 @@ def setup_config_no_guidance(data, sequence_length, diffusion_steps, checkpoint_
             'max_candidate_tokens': x_theta_config.get('max_candidate_tokens'),
             'top_k_values_for_local_search': x_theta_config.get('top_k_values_for_local_search'),
             'local_search_sampling_method': x_theta_config.get('local_search_sampling_method', 'top_p'),
+            'locally_typical_alpha': x_theta_config.get('locally_typical_alpha', 0.0),
         },
         
         # Training config (needed even for inference)
@@ -176,7 +177,8 @@ def create_x_theta_config(args):
             'upper_bound': args.upper_bound,
             'max_candidate_tokens': args.max_candidate_tokens,
             'top_k_values_for_local_search': args.top_k_values_for_local_search,
-            'local_search_sampling_method': args.local_search_sampling_method
+            'local_search_sampling_method': args.local_search_sampling_method,
+            'locally_typical_alpha': args.locally_typical_alpha
         }
 
 def create_posterior_sampling_config(args):

@@ -7,7 +7,7 @@ import torch
 from properties.property_util import compare_hierarchical
 
 
-def select_top_k_tokens(x_theta_probs, top_k, method='top_p'):
+def select_top_k_tokens(x_theta_probs, top_k, method='top_p', alpha=0.0):
     """
     Select top-k token indices from probability distribution.
     
@@ -15,6 +15,10 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p'):
         x_theta_probs: Probability distribution (batch_size, seq_len, vocab_size)
         top_k: Number of tokens to select
         method: Selection method - 'top_p' or 'locally_typical'
+        alpha: Weight for probability bias in locally_typical (default: 0.0)
+               alpha = 0.0: pure locally typical (entropy-based only)
+               alpha > 0.0: bias toward high probability tokens
+               alpha → ∞: approaches top-p behavior
     
     Returns:
         topk_indices: Tensor of shape (batch_size, seq_len, top_k) with selected token indices
@@ -25,10 +29,15 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p'):
         return topk_indices
     
     elif method == 'locally_typical':
-        # Locally Typical Sampling:
+        # Locally Typical Sampling with probability bias:
         # 1. Calculate entropy H of the distribution
-        # 2. For each token, calculate distance between -log(p) and H
+        # 2. For each token, calculate distance: |(-log(p)) - H| - alpha * log(p)
         # 3. Select top-k tokens with smallest distance
+        #
+        # The alpha term biases selection toward high probability tokens:
+        # - alpha = 0: pure locally typical (only entropy distance matters)
+        # - alpha > 0: high prob tokens get smaller distance → more likely to be selected
+        # - alpha → ∞: behaves like top-p (highest prob tokens always selected)
         
         # Calculate entropy H for each position: H = -sum(p * log(p))
         # Add small epsilon to avoid log(0)
@@ -39,10 +48,16 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p'):
         # Calculate -log(p) for each token
         neg_log_probs = -log_probs  # (batch_size, seq_len, vocab_size)
         
-        # Calculate distance: |(-log(p)) - H|
+        # Calculate base distance: |(-log(p)) - H|
         distance_to_entropy = torch.abs(neg_log_probs - entropy)  # (batch_size, seq_len, vocab_size)
         
-        # Select top-k tokens with SMALLEST distance (closest to entropy)
+        # Apply probability bias: subtract alpha * log(p)
+        # Since neg_log_probs = -log(p), we add alpha * neg_log_probs
+        # This makes high probability tokens (small neg_log_probs) have smaller final distance
+        if alpha > 0:
+            distance_to_entropy = distance_to_entropy - alpha * log_probs
+        
+        # Select top-k tokens with SMALLEST distance (closest to entropy + probability bias)
         # Use topk with largest=False to get smallest values
         _, topk_indices = torch.topk(distance_to_entropy, k=top_k, dim=-1, largest=False)
         
@@ -71,7 +86,7 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', device='cuda'):
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -121,10 +136,10 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     # Get top-k token indices for each position from x_theta using specified sampling method
     # x_theta_probs shape: (batch_size, seq_len, vocab_size)
-    topk_indices = select_top_k_tokens(x_theta_probs, top_k_values_for_local_search, method=sampling_method)
+    topk_indices = select_top_k_tokens(x_theta_probs, top_k_values_for_local_search, method=sampling_method, alpha=locally_typical_alpha)
     # topk_indices shape: (batch_size, seq_len, top_k_values_for_local_search)
     
-    print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' sampling in parallel...")
+    print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' sampling (alpha={locally_typical_alpha}) in parallel...")
     
     # FULLY VECTORIZED neighbor generation across ALL ranks at once!
     # Generate neighbors for ALL ranks simultaneously
