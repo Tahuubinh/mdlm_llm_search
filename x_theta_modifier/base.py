@@ -22,7 +22,7 @@ class XThetaModifier:
             mask_index: Index of the mask token (if None, will be computed)
             top_k_values_for_local_search: Top-k tokens to try per position (language only)
             local_search_sampling_method: Sampling method for local search (language only)
-            locally_typical_alpha: Weight for probability bias in locally_typical (language only)
+            locally_typical_alpha: Bias parameter (interpretation depends on method, language only)
         """
         self.vocab_size = vocab_size
         self.num_x_theta_samples = num_x_theta_samples

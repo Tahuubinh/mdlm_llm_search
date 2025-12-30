@@ -63,10 +63,10 @@ def parse_arguments():
     parser.add_argument("--top_k_values_for_local_search", type=int, default=10, 
                        help="For language data: number of top-k tokens to try per position in local search")
     parser.add_argument("--local_search_sampling_method", type=str, default="top_p", 
-                       choices=["top_p", "locally_typical"],
-                       help="Sampling method for local search: 'top_p' (highest probability) or 'locally_typical' (closest to entropy)")
+                       choices=["top_p", "locally_typical", "locally_typical_distance"],
+                       help="Sampling method for local search: 'top_p', 'locally_typical' (additive bias), or 'locally_typical_distance' (entropy scaling)")
     parser.add_argument("--locally_typical_alpha", type=float, default=0.0,
-                       help="Weight for probability bias in locally_typical sampling (0.0 = pure locally typical, >0 = bias toward high prob, default: 0.0)")
+                       help="Bias parameter for locally typical methods. For 'locally_typical': additive bias (0.0=pure, >0=bias high prob). For 'locally_typical_distance': entropy scaling (1.0=pure, <1.0=bias high prob). Default: 0.0 for additive, 1.0 for tau")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',

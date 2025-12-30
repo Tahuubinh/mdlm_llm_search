@@ -14,14 +14,22 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
         
         Args:
             top_k_values_for_local_search: Number of top-k tokens to try per position
-            local_search_sampling_method: Sampling method ('top_p' or 'locally_typical')
-            locally_typical_alpha: Weight for probability bias in locally_typical (0.0 = pure locally typical, >0 = bias toward high prob)
+            local_search_sampling_method: Sampling method ('top_p', 'locally_typical', or 'locally_typical_distance')
+            locally_typical_alpha: Bias parameter (interpretation depends on method):
+                                   - For 'locally_typical': additive bias (0.0 = pure, >0 = bias toward high prob)
+                                   - For 'locally_typical_distance': entropy scaling (1.0 = pure, <1.0 = bias toward high prob)
         """
         super().__init__(*args, **kwargs)
         self.top_k_values_for_local_search = top_k_values_for_local_search
         self.local_search_sampling_method = local_search_sampling_method
         self.locally_typical_alpha = locally_typical_alpha
-        print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha}")
+        
+        if self.local_search_sampling_method == 'locally_typical':
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (additive)")
+        elif self.local_search_sampling_method == 'locally_typical_distance':
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (scaling)")
+        else:
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}")
 
     def get_x_theta_method(self):
         modify_x_theta = modify_x_theta_no_condition

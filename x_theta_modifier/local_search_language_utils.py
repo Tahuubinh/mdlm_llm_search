@@ -14,11 +14,10 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p', alpha=0.0):
     Args:
         x_theta_probs: Probability distribution (batch_size, seq_len, vocab_size)
         top_k: Number of tokens to select
-        method: Selection method - 'top_p' or 'locally_typical'
-        alpha: Weight for probability bias in locally_typical (default: 0.0)
-               alpha = 0.0: pure locally typical (entropy-based only)
-               alpha > 0.0: bias toward high probability tokens
-               alpha → ∞: approaches top-p behavior
+        method: Selection method - 'top_p', 'locally_typical', or 'locally_typical_distance'
+        alpha: Bias parameter (interpretation depends on method):
+               - For 'locally_typical': additive bias weight (0.0 = pure, >0 = bias toward high prob)
+               - For 'locally_typical_distance': entropy scaling factor (1.0 = pure, <1.0 = bias toward high prob)
     
     Returns:
         topk_indices: Tensor of shape (batch_size, seq_len, top_k) with selected token indices
@@ -29,18 +28,15 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p', alpha=0.0):
         return topk_indices
     
     elif method == 'locally_typical':
-        # Locally Typical Sampling with probability bias:
-        # 1. Calculate entropy H of the distribution
-        # 2. For each token, calculate distance: |(-log(p)) - H| - alpha * log(p)
-        # 3. Select top-k tokens with smallest distance
-        #
+        # Locally Typical Sampling with probability bias (additive):
+        # Formula: distance = |-log(p) - H| - alpha * log(p)
+        # 
         # The alpha term biases selection toward high probability tokens:
         # - alpha = 0: pure locally typical (only entropy distance matters)
         # - alpha > 0: high prob tokens get smaller distance → more likely to be selected
         # - alpha → ∞: behaves like top-p (highest prob tokens always selected)
         
         # Calculate entropy H for each position: H = -sum(p * log(p))
-        # Add small epsilon to avoid log(0)
         epsilon = 1e-10
         log_probs = torch.log(x_theta_probs + epsilon)
         entropy = -torch.sum(x_theta_probs * log_probs, dim=-1, keepdim=True)  # (batch_size, seq_len, 1)
@@ -48,23 +44,52 @@ def select_top_k_tokens(x_theta_probs, top_k, method='top_p', alpha=0.0):
         # Calculate -log(p) for each token
         neg_log_probs = -log_probs  # (batch_size, seq_len, vocab_size)
         
-        # Calculate base distance: |(-log(p)) - H|
+        # Calculate base distance: |-log(p) - H|
         distance_to_entropy = torch.abs(neg_log_probs - entropy)  # (batch_size, seq_len, vocab_size)
         
         # Apply probability bias: subtract alpha * log(p)
-        # Since neg_log_probs = -log(p), we add alpha * neg_log_probs
-        # This makes high probability tokens (small neg_log_probs) have smaller final distance
         if alpha > 0:
             distance_to_entropy = distance_to_entropy - alpha * log_probs
         
-        # Select top-k tokens with SMALLEST distance (closest to entropy + probability bias)
-        # Use topk with largest=False to get smallest values
+        # Select top-k tokens with SMALLEST distance
         _, topk_indices = torch.topk(distance_to_entropy, k=top_k, dim=-1, largest=False)
         
         return topk_indices
     
+    elif method == 'locally_typical_distance':
+        # Locally Typical Sampling with entropy scaling (multiplicative):
+        # Formula: distance = |-log(p) - alpha * H|
+        #
+        # The alpha parameter scales the target information (using alpha instead of tau for consistency):
+        # - alpha = 1.0: pure locally typical (target = H, original algorithm)
+        # - alpha < 1.0: scale entropy down → target moves toward 0 → prefer high prob tokens
+        # - alpha → 0.0: target → 0 → equivalent to minimizing -log(p) → top-p behavior
+        #
+        # This is a different parameterization from 'locally_typical':
+        # - 'locally_typical' uses additive bias: distance - alpha*log(p)
+        # - 'locally_typical_distance' uses multiplicative scaling: |-log(p) - alpha*H|
+        
+        # Calculate entropy H for each position: H = -sum(p * log(p))
+        epsilon = 1e-10
+        log_probs = torch.log(x_theta_probs + epsilon)
+        entropy = -torch.sum(x_theta_probs * log_probs, dim=-1, keepdim=True)  # (batch_size, seq_len, 1)
+        
+        # Calculate -log(p) for each token
+        neg_log_probs = -log_probs  # (batch_size, seq_len, vocab_size)
+        
+        # Calculate distance with scaled entropy: |-log(p) - alpha * H|
+        # When alpha = 1.0: standard locally typical
+        # When alpha → 0.0: target approaches 0, which means selecting high prob tokens (low -log(p))
+        scaled_entropy = alpha * entropy
+        distance_to_scaled_entropy = torch.abs(neg_log_probs - scaled_entropy)  # (batch_size, seq_len, vocab_size)
+        
+        # Select top-k tokens with SMALLEST distance
+        _, topk_indices = torch.topk(distance_to_scaled_entropy, k=top_k, dim=-1, largest=False)
+        
+        return topk_indices
+    
     else:
-        raise ValueError(f"Unknown sampling method: {method}. Choose 'top_p' or 'locally_typical'")
+        raise ValueError(f"Unknown sampling method: {method}. Choose 'top_p', 'locally_typical', or 'locally_typical_distance'")
 
 
 def clean_text_samples(text_samples):
@@ -136,10 +161,21 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     # Get top-k token indices for each position from x_theta using specified sampling method
     # x_theta_probs shape: (batch_size, seq_len, vocab_size)
-    topk_indices = select_top_k_tokens(x_theta_probs, top_k_values_for_local_search, method=sampling_method, alpha=locally_typical_alpha)
+    topk_indices = select_top_k_tokens(
+        x_theta_probs, 
+        top_k_values_for_local_search, 
+        method=sampling_method, 
+        alpha=locally_typical_alpha
+    )
     # topk_indices shape: (batch_size, seq_len, top_k_values_for_local_search)
     
-    print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' sampling (alpha={locally_typical_alpha}) in parallel...")
+    # Print appropriate message based on sampling method
+    if sampling_method == 'locally_typical':
+        print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' (additive alpha={locally_typical_alpha}) in parallel...")
+    elif sampling_method == 'locally_typical_distance':
+        print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' (scaling alpha={locally_typical_alpha}) in parallel...")
+    else:
+        print(f"  Local search: generating ALL neighbors from top-{top_k_values_for_local_search} tokens using '{sampling_method}' in parallel...")
     
     # FULLY VECTORIZED neighbor generation across ALL ranks at once!
     # Generate neighbors for ALL ranks simultaneously
