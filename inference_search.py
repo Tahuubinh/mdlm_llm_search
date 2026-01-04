@@ -67,6 +67,8 @@ def parse_arguments():
                        help="Sampling method for local search: 'top_p', 'locally_typical' (additive bias), or 'locally_typical_distance' (entropy scaling)")
     parser.add_argument("--locally_typical_alpha", type=float, default=0.0,
                        help="Bias parameter for locally typical methods. For 'locally_typical': additive bias (0.0=pure, >0=bias high prob). For 'locally_typical_distance': entropy scaling (1.0=pure, <1.0=bias high prob). Default: 0.0 for additive, 1.0 for tau")
+    parser.add_argument("--best_sequence_rank", type=int, default=1,
+                       help="Select the sequence with the Nth smallest distance (1=best, 2=second best, 3=third best, etc.). Default: 1")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',
@@ -162,7 +164,7 @@ def main():
     elif "localsearch" in x_theta_type:
         folder_name_suffix = f"{posterior_sampling_method}/{x_theta_type}_{args.x_theta_num_local_searches}_{max_candidate_tokens}/{property_type}_lb{lower_bound}_ub{upper_bound}"
 
-    mol_folder = f"{output_folder}/{folder_name_suffix}/{args.local_search_sampling_method}/{args.locally_typical_alpha}/{args.version}/seed_{args.seed}"
+    mol_folder = f"{output_folder}/{folder_name_suffix}/{args.best_sequence_rank}/{args.local_search_sampling_method}/{args.locally_typical_alpha}/{args.version}/seed_{args.seed}"
 
     # Save molecules based on data type
     if data == 'openwebtext-split':

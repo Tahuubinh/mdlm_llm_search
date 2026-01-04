@@ -9,7 +9,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
     Uses batch processing and model's x_theta probabilities to guide search.
     """
     
-    def __init__(self, top_k_values_for_local_search=10, local_search_sampling_method='top_p', locally_typical_alpha=0.0, *args, **kwargs):
+    def __init__(self, top_k_values_for_local_search=10, local_search_sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, *args, **kwargs):
         """Initialize the BoN Local Search sampler for language.
         
         Args:
@@ -18,18 +18,20 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
             locally_typical_alpha: Bias parameter (interpretation depends on method):
                                    - For 'locally_typical': additive bias (0.0 = pure, >0 = bias toward high prob)
                                    - For 'locally_typical_distance': entropy scaling (1.0 = pure, <1.0 = bias toward high prob)
+            best_sequence_rank: Select the sequence with the Nth smallest distance (1=best, 2=second best, etc.)
         """
         super().__init__(*args, **kwargs)
         self.top_k_values_for_local_search = top_k_values_for_local_search
         self.local_search_sampling_method = local_search_sampling_method
         self.locally_typical_alpha = locally_typical_alpha
+        self.best_sequence_rank = best_sequence_rank
         
         if self.local_search_sampling_method == 'locally_typical':
-            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (additive)")
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (additive), best_sequence_rank={self.best_sequence_rank}")
         elif self.local_search_sampling_method == 'locally_typical_distance':
-            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (scaling)")
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, alpha={self.locally_typical_alpha} (scaling), best_sequence_rank={self.best_sequence_rank}")
         else:
-            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}")
+            print(f"Initialized BoN Local Search for Language with top_k={self.top_k_values_for_local_search}, sampling_method={self.local_search_sampling_method}, best_sequence_rank={self.best_sequence_rank}")
 
     def get_x_theta_method(self):
         modify_x_theta = modify_x_theta_no_condition
@@ -86,6 +88,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     top_k_values_for_local_search=self.top_k_values_for_local_search,
                     sampling_method=self.local_search_sampling_method,
                     locally_typical_alpha=self.locally_typical_alpha,
+                    best_sequence_rank=self.best_sequence_rank,
                     device=device
                 )
                 print(f"Step {step}: Local search completed")

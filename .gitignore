@@ -22,3 +22,4 @@ core.*
 !configs/data/
 outputs
 outputs/
+selected_samples_presentation/

@@ -111,7 +111,7 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, device='cuda'):
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -132,6 +132,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         tokenizer: Tokenizer for decoding sequences
         top_k_values_for_local_search: Number of top-k values to try per position
         sampling_method: Selection method - 'top_p' (highest probability) or 'locally_typical' (closest to entropy)
+        best_sequence_rank: Select the sequence with the Nth smallest distance (1=best, 2=second best, etc.)
         device: Device to use
     
     Returns:
@@ -242,19 +243,59 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     print(f"  Local search: Updating best sequences...")
     
+    # Track top-k best sequences for each batch element
+    # We'll store tuples of (distance_tensor, tokens_tensor) for each sequence
+    # Initialize with the original best sequence
+    batch_top_sequences = []
+    for batch_idx in range(batch_size):
+        # Each batch element starts with its current best sequence
+        initial_entry = (best_distances_tensor[batch_idx].clone(), best_tokens[batch_idx].clone())
+        batch_top_sequences.append([initial_entry])
+    
+    max_keep = max(best_sequence_rank, 10)
     # Update best sequences if neighbors are better
     for i, (batch_idx, pos, k_rank) in enumerate(all_neighbor_metadata):
         neighbor_dist = neighbor_distances_tensor[i]  # [num_properties]
-        best_dist = best_distances_tensor[batch_idx]  # [num_properties]
+        neighbor_tok = neighbor_tokens_batch[i]  # [seq_len]
         
-        # Convert to lists for compare_hierarchical
+        # Check if this neighbor should be added to top sequences
+        top_list = batch_top_sequences[batch_idx]
+        
+        # Find insertion position using hierarchical comparison
+        insert_idx = len(top_list)  # Default: append at end
         neighbor_dist_list = neighbor_dist.cpu().tolist()
-        best_dist_list = best_dist.cpu().tolist()
         
-        # Check if neighbor is better
-        if compare_hierarchical(neighbor_dist_list, best_dist_list) < 0:
-            best_tokens[batch_idx] = neighbor_tokens_batch[i]
-            best_distances_tensor[batch_idx] = neighbor_dist.clone()
+        for idx, (existing_dist, _) in enumerate(top_list):
+            existing_dist_list = existing_dist.cpu().tolist()
+            if compare_hierarchical(neighbor_dist_list, existing_dist_list) < 0:
+                insert_idx = idx
+                break
+        
+        # Insert neighbor at the appropriate position
+        # Keep only top max(best_sequence_rank, 10) to avoid memory issues
+        if insert_idx < max_keep:
+            top_list.insert(insert_idx, (neighbor_dist.clone(), neighbor_tok.clone()))
+            # Trim list to max_keep
+            if len(top_list) > max_keep:
+                top_list.pop()
+    
+    # Select the sequence at the specified rank for each batch element
+    for batch_idx in range(batch_size):
+        top_list = batch_top_sequences[batch_idx]
+        # Adjust for 0-indexing (rank 1 = index 0)
+        rank_idx = best_sequence_rank - 1
+        
+        if rank_idx < len(top_list):
+            # Use the sequence at the specified rank
+            best_distances_tensor[batch_idx] = top_list[rank_idx][0]
+            best_tokens[batch_idx] = top_list[rank_idx][1]
+        else:
+            # If we don't have enough sequences, use the last one available
+            best_distances_tensor[batch_idx] = top_list[-1][0]
+            best_tokens[batch_idx] = top_list[-1][1]
+    
+    if best_sequence_rank > 1:
+        print(f"  Local search: Selected sequences with rank {best_sequence_rank} (distance-wise)")
     
     return best_tokens
 
