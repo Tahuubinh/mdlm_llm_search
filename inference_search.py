@@ -164,7 +164,7 @@ def main():
     elif "localsearch" in x_theta_type:
         folder_name_suffix = f"{posterior_sampling_method}/{x_theta_type}_{args.x_theta_num_local_searches}_{max_candidate_tokens}/{property_type}_lb{lower_bound}_ub{upper_bound}"
 
-    mol_folder = f"{output_folder}/{folder_name_suffix}/{args.best_sequence_rank}/{args.local_search_sampling_method}/{args.locally_typical_alpha}/{args.version}/seed_{args.seed}"
+    mol_folder = f"{output_folder}/{folder_name_suffix}/rank_{args.best_sequence_rank}/{args.local_search_sampling_method}/{args.locally_typical_alpha}/{args.version}/seed_{args.seed}"
 
     # Save molecules based on data type
     if data == 'openwebtext-split':

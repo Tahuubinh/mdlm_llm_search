@@ -292,7 +292,8 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
         checkpoint_path,
         tokenizer=tokenizer,
         config=config, 
-        logger=False
+        logger=False,
+        weights_only=False
     )
     
     # Move model to GPU if available

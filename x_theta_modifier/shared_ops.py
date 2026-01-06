@@ -27,6 +27,37 @@ def gumbel_sample(x_theta, num_samples):
     all_samples = (x_theta.unsqueeze(0).log() + gumbel_noise).argmax(dim=-1)
     return all_samples
 
+def gumbel_sample_sequential(x_theta, num_samples):
+    """
+    Sequential version of gumbel_sample that creates samples one at a time
+    to reduce memory usage. Instead of creating all samples at once, this
+    creates one sample for all batches at a time, repeating num_samples times.
+    
+    Args:
+        x_theta: Logits tensor of shape [batch_size, seq_len, vocab_size]
+        num_samples: Number of samples to generate
+    
+    Returns:
+        Tensor of shape [num_samples, batch_size, seq_len] containing sampled token ids
+    """
+    batch_size, seq_len, vocab_size = x_theta.shape
+    device = x_theta.device
+    
+    # Pre-compute log probabilities once
+    log_x_theta = x_theta.log()
+    
+    # Pre-allocate output tensor
+    all_samples = torch.empty((num_samples, batch_size, seq_len), dtype=torch.long, device=device)
+    
+    # Generate samples one at a time
+    for i in range(num_samples):
+        # Generate Gumbel noise for one sample across all batches
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(x_theta) + 1e-10) + 1e-10)
+        # Sample by taking argmax
+        all_samples[i] = (log_x_theta + gumbel_noise).argmax(dim=-1)
+    
+    return all_samples
+
 def keep_nonmask_values(all_samples, xt, mask_index):
     non_mask = (xt != mask_index).unsqueeze(0)  # Shape: [1, batch_size, length]
     all_samples = torch.where(non_mask, xt.unsqueeze(0).expand_as(all_samples), all_samples)
