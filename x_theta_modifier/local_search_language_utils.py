@@ -114,14 +114,17 @@ def clean_text_samples(text_samples):
 
 def calculate_ngram_char_fraction(text, n):
     """
-    Calculate the fraction of characters in the most common n-gram.
+    Calculate the fraction of characters covered by the most common n-gram.
+    
+    Uses index set to avoid double-counting overlapping n-grams.
+    This ensures the result is always in [0, 1].
     
     Args:
         text: Input text string
         n: N-gram size
     
     Returns:
-        Fraction of characters covered by the most common n-gram
+        Fraction of character positions covered by the most common n-gram
     """
     if len(text) < n:
         return 0.0
@@ -135,11 +138,19 @@ def calculate_ngram_char_fraction(text, n):
     # Count n-grams
     ngram_counts = Counter(ngrams)
     
-    # Get the most common n-gram and its count
-    most_common_ngram, count = ngram_counts.most_common(1)[0]
+    # Get the most common n-gram
+    most_common_ngram, _ = ngram_counts.most_common(1)[0]
     
-    # Calculate fraction: (count * n) / total_chars
-    fraction = (count * n) / len(text)
+    # Find all character indices covered by this n-gram
+    covered_indices = set()
+    for i in range(len(text) - n + 1):
+        if text[i:i+n] == most_common_ngram:
+            # Add all indices that this n-gram covers
+            for j in range(i, i + n):
+                covered_indices.add(j)
+    
+    # Calculate fraction of covered positions
+    fraction = len(covered_indices) / len(text)
     
     return fraction
 
@@ -148,12 +159,15 @@ def calculate_duplicate_ngram_char_fraction(text, n):
     """
     Calculate the fraction of characters in duplicate n-grams (appearing more than once).
     
+    Uses index set to avoid double-counting overlapping n-grams.
+    This ensures the result is always in [0, 1].
+    
     Args:
         text: Input text string
         n: N-gram size
     
     Returns:
-        Fraction of characters in duplicate n-grams
+        Fraction of character positions covered by duplicate n-grams
     """
     if len(text) < n:
         return 0.0
@@ -167,11 +181,22 @@ def calculate_duplicate_ngram_char_fraction(text, n):
     # Count n-grams
     ngram_counts = Counter(ngrams)
     
-    # Calculate total characters in duplicate n-grams
-    duplicate_chars = sum(count * n for ngram, count in ngram_counts.items() if count > 1)
+    # Get n-grams that appear more than once
+    duplicate_ngrams = {ngram for ngram, count in ngram_counts.items() if count > 1}
     
-    # Calculate fraction
-    fraction = duplicate_chars / len(text)
+    if not duplicate_ngrams:
+        return 0.0
+    
+    # Find all character indices covered by duplicate n-grams
+    covered_indices = set()
+    for i in range(len(text) - n + 1):
+        if text[i:i+n] in duplicate_ngrams:
+            # Add all indices that this n-gram covers
+            for j in range(i, i + n):
+                covered_indices.add(j)
+    
+    # Calculate fraction of covered positions
+    fraction = len(covered_indices) / len(text)
     
     return fraction
 
@@ -343,31 +368,52 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         # Count violations for each neighbor
         neighbor_violations = [count_repetition_violations(text) for text in neighbor_texts_cleaned_for_filter]
         
-        # Find minimum violation count
-        min_violations = min(neighbor_violations)
+        # Group violations by batch_idx (each sample should filter independently)
+        batch_neighbor_violations = {b_idx: [] for b_idx in range(batch_size)}
+        for i, (b_idx, _, _) in enumerate(all_neighbor_metadata):
+            batch_neighbor_violations[b_idx].append((i, neighbor_violations[i]))
         
-        # Keep only neighbors with minimum violations
-        valid_indices = [i for i, v in enumerate(neighbor_violations) if v == min_violations]
+        # For each batch element, find its own minimum violations and keep only those neighbors
+        valid_indices = []
+        batch_min_violations = {}
+        
+        for b_idx in range(batch_size):
+            if not batch_neighbor_violations[b_idx]:
+                continue
+            
+            # Find minimum violations for THIS batch element only
+            min_violations_for_batch = min(v for _, v in batch_neighbor_violations[b_idx])
+            batch_min_violations[b_idx] = min_violations_for_batch
+            
+            # Keep neighbors with minimum violations for this batch element
+            for neighbor_idx, violations in batch_neighbor_violations[b_idx]:
+                if violations == min_violations_for_batch:
+                    valid_indices.append(neighbor_idx)
         
         # Also check original best_tokens violations for comparison
         best_texts_for_filter = tokenizer.batch_decode(best_tokens.cpu().numpy())
         best_texts_cleaned_for_filter = clean_text_samples(best_texts_for_filter)
         best_violations = [count_repetition_violations(text) for text in best_texts_cleaned_for_filter]
-        avg_best_violations = sum(best_violations) / len(best_violations) if best_violations else 0
         
-        print(f"  Local search: Min violations in neighbors: {min_violations}, Avg violations in original: {avg_best_violations:.2f}")
+        # Print statistics per batch
+        print(f"  Local search: Violation statistics per sample:")
+        for b_idx in range(batch_size):
+            min_v = batch_min_violations.get(b_idx, 'N/A')
+            orig_v = best_violations[b_idx] if b_idx < len(best_violations) else 'N/A'
+            num_kept = sum(1 for i in valid_indices if all_neighbor_metadata[i][0] == b_idx)
+            print(f"    Sample {b_idx}: Min violations in neighbors={min_v}, Original violations={orig_v}, Kept {num_kept} neighbors")
         
         if len(valid_indices) == 0:
             print(f"  Local search: No neighbors found (should not happen), returning original tokens")
             return best_tokens
         
-        # Filter neighbors and metadata to keep only those with minimum violations
+        # Filter neighbors and metadata to keep only those with minimum violations (per batch)
         neighbor_tokens_batch = neighbor_tokens_batch[valid_indices]
         all_neighbor_metadata = [all_neighbor_metadata[i] for i in valid_indices]
         
         filtered_count = total_neighbors - len(valid_indices)
         total_neighbors = len(valid_indices)
-        print(f"  Local search: Kept {total_neighbors} neighbors with {min_violations} violations, filtered out {filtered_count} neighbors with more violations")
+        print(f"  Local search: Total kept {total_neighbors} neighbors, filtered out {filtered_count} neighbors")
     
     print(f"  Local search: Evaluating all {total_neighbors} neighbors in parallel...")
     
@@ -396,12 +442,27 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     # Track top-k best sequences for each batch element
     # We'll store tuples of (distance_tensor, tokens_tensor) for each sequence
-    # Initialize with the original best sequence
+    # Initialize with the original best sequence ONLY if its violations are acceptable
     batch_top_sequences = []
     for batch_idx in range(batch_size):
-        # Each batch element starts with its current best sequence
-        initial_entry = (best_distances_tensor[batch_idx].clone(), best_tokens[batch_idx].clone())
-        batch_top_sequences.append([initial_entry])
+        # Only include original best_tokens if it has violations <= min violations of its neighbors
+        # This ensures that if neighbors have better (lower) violations, original will be replaced
+        if filter_repetitions and batch_idx in batch_min_violations:
+            min_v = batch_min_violations[batch_idx]
+            orig_v = best_violations[batch_idx]
+            if orig_v <= min_v:
+                # Original is competitive - include it in comparison
+                initial_entry = (best_distances_tensor[batch_idx].clone(), best_tokens[batch_idx].clone())
+                batch_top_sequences.append([initial_entry])
+                print(f"    Sample {batch_idx}: Original (violations={orig_v}) included in comparison (min_v={min_v})")
+            else:
+                # Original has more violations than best neighbors - exclude it, forcing replacement
+                batch_top_sequences.append([])
+                print(f"    Sample {batch_idx}: Original (violations={orig_v}) EXCLUDED from comparison (min_v={min_v}), will be replaced")
+        else:
+            # No filtering, include original
+            initial_entry = (best_distances_tensor[batch_idx].clone(), best_tokens[batch_idx].clone())
+            batch_top_sequences.append([initial_entry])
     
     max_keep = max(best_sequence_rank, 10)
     # Update best sequences if neighbors are better
@@ -433,6 +494,12 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     # Select the sequence at the specified rank for each batch element
     for batch_idx in range(batch_size):
         top_list = batch_top_sequences[batch_idx]
+        
+        if len(top_list) == 0:
+            # This should not happen as we always have neighbors, but safety check
+            print(f"    WARNING: Sample {batch_idx} has no candidates, keeping original")
+            continue
+        
         # Adjust for 0-indexing (rank 1 = index 0)
         rank_idx = best_sequence_rank - 1
         
