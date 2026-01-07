@@ -178,6 +178,7 @@ class Diffusion(L.LightningModule):
     local_search_sampling_method = getattr(config.sampling, 'local_search_sampling_method', 'top_p')  # Default to 'top_p' if not set
     locally_typical_alpha = getattr(config.sampling, 'locally_typical_alpha', 0.0)  # Default to 0.0 if not set
     best_sequence_rank = getattr(config.sampling, 'best_sequence_rank')
+    filter_repetitions = getattr(config.sampling, 'filter_repetitions', False)  # Default to False if not set
 
     sampler = SAMPLING_METHOD_CLASSES[self.posterior_sampling_method](
         num_posterior_samples=num_posterior_samples,
@@ -215,6 +216,7 @@ class Diffusion(L.LightningModule):
         local_search_sampling_method=local_search_sampling_method,
         locally_typical_alpha=locally_typical_alpha,
         best_sequence_rank=best_sequence_rank,
+        filter_repetitions=filter_repetitions,
     )
     self._modify_x_theta = x_theta_modifier.get_x_theta_method()
 

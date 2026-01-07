@@ -10,7 +10,7 @@ from properties.property_util import *
 class XThetaModifier:
     """Base class for samplers with common initialization and abstract sampling method."""
 
-    def __init__(self, num_x_theta_samples, property_type, lower_bound, upper_bound, num_local_searches, tokenizer, top_k_categorical, num_diffusion_steps, data, max_candidate_tokens, vocab_size, mask_index=None, top_k_values_for_local_search=10, local_search_sampling_method='top_p', locally_typical_alpha=0.0):
+    def __init__(self, num_x_theta_samples, property_type, lower_bound, upper_bound, num_local_searches, tokenizer, top_k_categorical, num_diffusion_steps, data, max_candidate_tokens, vocab_size, mask_index=None, top_k_values_for_local_search=10, local_search_sampling_method='top_p', locally_typical_alpha=0.0, filter_repetitions=False):
         """Initialize the sampler with common parameters.
         
         Args:
@@ -23,6 +23,7 @@ class XThetaModifier:
             top_k_values_for_local_search: Top-k tokens to try per position (language only)
             local_search_sampling_method: Sampling method for local search (language only)
             locally_typical_alpha: Bias parameter (interpretation depends on method, language only)
+            filter_repetitions: Filter out repetitive neighbors (language only)
         """
         self.vocab_size = vocab_size
         self.num_x_theta_samples = num_x_theta_samples
@@ -39,6 +40,7 @@ class XThetaModifier:
         self.num_diffusion_steps = num_diffusion_steps
         self.data = data
         self.max_candidate_tokens = max_candidate_tokens
+        self.filter_repetitions = filter_repetitions
         # Use provided mask_index if available, otherwise compute it
         if mask_index is not None:
             self.mask_index = mask_index

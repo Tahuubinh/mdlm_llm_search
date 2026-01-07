@@ -69,6 +69,8 @@ def parse_arguments():
                        help="Bias parameter for locally typical methods. For 'locally_typical': additive bias (0.0=pure, >0=bias high prob). For 'locally_typical_distance': entropy scaling (1.0=pure, <1.0=bias high prob). Default: 0.0 for additive, 1.0 for tau")
     parser.add_argument("--best_sequence_rank", type=int, default=1,
                        help="Select the sequence with the Nth smallest distance (1=best, 2=second best, 3=third best, etc.). Default: 1")
+    parser.add_argument("--filter_repetitions", action='store_true',
+                       help="Filter out neighbors that violate n-gram repetition criteria during local search")
     
     # Toxicity-specific parameters
     parser.add_argument('--prefix_dir', type=str, default='data/toxicity/1000_samples',

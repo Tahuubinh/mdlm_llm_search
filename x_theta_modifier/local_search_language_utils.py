@@ -4,6 +4,7 @@ Optimized for batch processing with property models.
 """
 
 import torch
+from collections import Counter
 from properties.property_util import compare_hierarchical
 
 
@@ -111,7 +112,120 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, device='cuda'):
+def calculate_ngram_char_fraction(text, n):
+    """
+    Calculate the fraction of characters in the most common n-gram.
+    
+    Args:
+        text: Input text string
+        n: N-gram size
+    
+    Returns:
+        Fraction of characters covered by the most common n-gram
+    """
+    if len(text) < n:
+        return 0.0
+    
+    # Generate all character n-grams
+    ngrams = [text[i:i+n] for i in range(len(text) - n + 1)]
+    
+    if not ngrams:
+        return 0.0
+    
+    # Count n-grams
+    ngram_counts = Counter(ngrams)
+    
+    # Get the most common n-gram and its count
+    most_common_ngram, count = ngram_counts.most_common(1)[0]
+    
+    # Calculate fraction: (count * n) / total_chars
+    fraction = (count * n) / len(text)
+    
+    return fraction
+
+
+def calculate_duplicate_ngram_char_fraction(text, n):
+    """
+    Calculate the fraction of characters in duplicate n-grams (appearing more than once).
+    
+    Args:
+        text: Input text string
+        n: N-gram size
+    
+    Returns:
+        Fraction of characters in duplicate n-grams
+    """
+    if len(text) < n:
+        return 0.0
+    
+    # Generate all character n-grams
+    ngrams = [text[i:i+n] for i in range(len(text) - n + 1)]
+    
+    if not ngrams:
+        return 0.0
+    
+    # Count n-grams
+    ngram_counts = Counter(ngrams)
+    
+    # Calculate total characters in duplicate n-grams
+    duplicate_chars = sum(count * n for ngram, count in ngram_counts.items() if count > 1)
+    
+    # Calculate fraction
+    fraction = duplicate_chars / len(text)
+    
+    return fraction
+
+
+def count_repetition_violations(text):
+    """
+    Count how many repetition criteria the text violates.
+    
+    Returns the number of violated criteria (0 = perfect, 9 = violates all).
+    
+    Criteria:
+    - Top 2-gram character fraction < 0.20
+    - Top 3-gram character fraction < 0.18
+    - Top 4-gram character fraction < 0.16
+    - Duplicate 5-gram character fraction < 0.15
+    - Duplicate 6-gram character fraction < 0.14
+    - Duplicate 7-gram character fraction < 0.13
+    - Duplicate 8-gram character fraction < 0.12
+    - Duplicate 9-gram character fraction < 0.11
+    - Duplicate 10-gram character fraction < 0.10
+    """
+    violations = 0
+    
+    # Check top n-gram criteria (2-4)
+    top_ngram_thresholds = {
+        2: 0.20,
+        3: 0.18,
+        4: 0.16
+    }
+    
+    for n, threshold in top_ngram_thresholds.items():
+        fraction = calculate_ngram_char_fraction(text, n)
+        if fraction >= threshold:
+            violations += 1
+    
+    # Check duplicate n-gram criteria (5-10)
+    duplicate_ngram_thresholds = {
+        5: 0.15,
+        6: 0.14,
+        7: 0.13,
+        8: 0.12,
+        9: 0.11,
+        10: 0.10
+    }
+    
+    for n, threshold in duplicate_ngram_thresholds.items():
+        fraction = calculate_duplicate_ngram_char_fraction(text, n)
+        if fraction >= threshold:
+            violations += 1
+    
+    return violations
+
+
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, filter_repetitions=False, device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -133,6 +247,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         top_k_values_for_local_search: Number of top-k values to try per position
         sampling_method: Selection method - 'top_p' (highest probability) or 'locally_typical' (closest to entropy)
         best_sequence_rank: Select the sequence with the Nth smallest distance (1=best, 2=second best, etc.)
+        filter_repetitions: If True, filter out neighbors that violate repetition criteria
         device: Device to use
     
     Returns:
@@ -217,6 +332,42 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     total_neighbors = neighbor_tokens_batch.shape[0]
     print(f"  Local search: Generated {total_neighbors} unique neighbors across all ranks")
+    
+    # Filter repetitive neighbors if requested
+    if filter_repetitions:
+        print(f"  Local search: Filtering repetitive neighbors...")
+        # Decode neighbors to check repetition
+        neighbor_texts_for_filter = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy())
+        neighbor_texts_cleaned_for_filter = clean_text_samples(neighbor_texts_for_filter)
+        
+        # Count violations for each neighbor
+        neighbor_violations = [count_repetition_violations(text) for text in neighbor_texts_cleaned_for_filter]
+        
+        # Find minimum violation count
+        min_violations = min(neighbor_violations)
+        
+        # Keep only neighbors with minimum violations
+        valid_indices = [i for i, v in enumerate(neighbor_violations) if v == min_violations]
+        
+        # Also check original best_tokens violations for comparison
+        best_texts_for_filter = tokenizer.batch_decode(best_tokens.cpu().numpy())
+        best_texts_cleaned_for_filter = clean_text_samples(best_texts_for_filter)
+        best_violations = [count_repetition_violations(text) for text in best_texts_cleaned_for_filter]
+        avg_best_violations = sum(best_violations) / len(best_violations) if best_violations else 0
+        
+        print(f"  Local search: Min violations in neighbors: {min_violations}, Avg violations in original: {avg_best_violations:.2f}")
+        
+        if len(valid_indices) == 0:
+            print(f"  Local search: No neighbors found (should not happen), returning original tokens")
+            return best_tokens
+        
+        # Filter neighbors and metadata to keep only those with minimum violations
+        neighbor_tokens_batch = neighbor_tokens_batch[valid_indices]
+        all_neighbor_metadata = [all_neighbor_metadata[i] for i in valid_indices]
+        
+        filtered_count = total_neighbors - len(valid_indices)
+        total_neighbors = len(valid_indices)
+        print(f"  Local search: Kept {total_neighbors} neighbors with {min_violations} violations, filtered out {filtered_count} neighbors with more violations")
     
     print(f"  Local search: Evaluating all {total_neighbors} neighbors in parallel...")
     

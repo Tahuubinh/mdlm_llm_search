@@ -44,10 +44,10 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
             # at positions where non_mask is True, keeping other values unchanged.
             all_samples, non_mask = keep_nonmask_values(all_samples, xt, self.mask_index)
             num_x_theta_samples_keepbest = self.num_x_theta_samples
-            # if best_clean_samples is not None:  # Check if best_clean_samples is not empty
-            #     best_clean_samples_expanded = best_clean_samples.unsqueeze(0)
-            #     all_samples = torch.cat([all_samples, best_clean_samples_expanded], dim=0)
-            #     num_x_theta_samples_keepbest += 1
+            if best_clean_samples is not None:  # Check if best_clean_samples is not empty
+                best_clean_samples_expanded = best_clean_samples.unsqueeze(0)
+                all_samples = torch.cat([all_samples, best_clean_samples_expanded], dim=0)
+                num_x_theta_samples_keepbest += 1
 
             device = all_samples.device
             batch_shape = x_theta.shape[:-1]
@@ -90,6 +90,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     sampling_method=self.local_search_sampling_method,
                     locally_typical_alpha=self.locally_typical_alpha,
                     best_sequence_rank=self.best_sequence_rank,
+                    filter_repetitions=self.filter_repetitions,
                     device=device
                 )
                 print(f"Step {step}: Local search completed")
