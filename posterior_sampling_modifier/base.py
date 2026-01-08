@@ -6,6 +6,7 @@ from properties.toxicity_property import calculate_toxicity, calc_toxicity_paral
 from properties.perplexity_property import calculate_perplexity, calc_perplexity_parallel
 from properties.repetition_property import count_repetition_violations, calc_repetition_violations_parallel
 from properties.quality_property import count_quality_violations, calc_quality_violations_parallel
+from properties.word_repetition_property import count_word_repetition_violations, calc_word_repetition_violations_parallel
 from properties.property_util import *
 
 
@@ -68,6 +69,7 @@ class Sampler:
                 "perplexity": calc_perplexity_parallel,
                 "repetition": calc_repetition_violations_parallel,
                 "quality": calc_quality_violations_parallel,
+                "word_repetition": calc_word_repetition_violations_parallel,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")
@@ -90,6 +92,7 @@ class Sampler:
                 "perplexity": calculate_perplexity,
                 "repetition": count_repetition_violations,
                 "quality": count_quality_violations,
+                "word_repetition": count_word_repetition_violations,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")
