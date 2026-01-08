@@ -140,6 +140,8 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     """
     batch_size, seq_len = best_tokens.shape
     
+    # NOTE: We calculate best_distances here to initialize batch_top_sequences later
+    # This is needed for hierarchical comparison with neighbors
     # Step 1: Decode best_tokens to text
     best_texts = tokenizer.batch_decode(best_tokens.cpu().numpy())
     
@@ -218,28 +220,84 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     total_neighbors = neighbor_tokens_batch.shape[0]
     print(f"  Local search: Generated {total_neighbors} unique neighbors across all ranks")
     
-    print(f"  Local search: Evaluating all {total_neighbors} neighbors in parallel...")
+    print(f"  Local search: Evaluating neighbors with hierarchical property filtering...")
     
-    # Step 1: Decode neighbor_tokens_batch to text
+    # HIERARCHICAL PROPERTY EVALUATION
+    # Instead of computing all properties at once, compute them one by one in priority order
+    # After each property, keep only neighbors with minimum distance for that property (per batch)
+    # This significantly reduces computation for lower-priority properties
+    
+    num_properties = len(property_calcs_parallel)
+    
+    # Initialize distance tensor: will be filled incrementally
+    # Shape: [total_neighbors, num_properties]
+    neighbor_distances_tensor = torch.zeros((total_neighbors, num_properties), device=device)
+    
+    # Keep track of active neighbors (indices into neighbor_tokens_batch)
+    active_neighbor_indices = list(range(total_neighbors))
+    active_neighbor_metadata = list(all_neighbor_metadata)
+    
+    # Decode texts once (will be reused)
     neighbor_texts = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy())
-    
-    # Step 2: Clean text by removing special tokens
     neighbor_texts_cleaned = clean_text_samples(neighbor_texts)
     
-    # Step 3: Calculate properties using cleaned text (let property calculators handle encoding)
-    neighbor_prop_values = [
-        calc(neighbor_texts_cleaned, total_neighbors, device)
-        for calc in property_calcs_parallel
-    ]
+    # Process each property in order (priority: first property is most important)
+    for prop_idx in range(num_properties):
+        if len(active_neighbor_indices) == 0:
+            print(f"  Local search: No active neighbors remaining after property {prop_idx-1}")
+            break
+        
+        print(f"  Local search: Property {prop_idx}/{num_properties} - Evaluating {len(active_neighbor_indices)} active neighbors...")
+        
+        # Get texts for active neighbors only
+        active_texts = [neighbor_texts_cleaned[i] for i in active_neighbor_indices]
+        
+        # Calculate this property for active neighbors
+        prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)
+        
+        # Apply distance function
+        distances = distance_to_bounds_parallel[prop_idx](prop_values)
+        
+        # Store distances in the full tensor
+        for local_idx, global_idx in enumerate(active_neighbor_indices):
+            neighbor_distances_tensor[global_idx, prop_idx] = distances[local_idx]
+        
+        # If this is NOT the last property, filter neighbors by minimum distance (per batch)
+        if prop_idx < num_properties - 1:
+            # Group by batch_idx
+            batch_neighbor_distances = {b_idx: [] for b_idx in range(batch_size)}
+            for local_idx, global_idx in enumerate(active_neighbor_indices):
+                b_idx = active_neighbor_metadata[local_idx][0]
+                batch_neighbor_distances[b_idx].append((global_idx, distances[local_idx].item()))
+            
+            # Find minimum distance per batch and keep only those neighbors
+            new_active_indices = []
+            new_active_metadata = []
+            
+            for b_idx in range(batch_size):
+                if not batch_neighbor_distances[b_idx]:
+                    continue
+                
+                # Find minimum distance for this batch
+                min_dist = min(dist for _, dist in batch_neighbor_distances[b_idx])
+                
+                # Keep neighbors with minimum distance
+                for global_idx, dist in batch_neighbor_distances[b_idx]:
+                    if dist == min_dist:
+                        new_active_indices.append(global_idx)
+                        # Find corresponding metadata
+                        for i, idx in enumerate(active_neighbor_indices):
+                            if idx == global_idx:
+                                new_active_metadata.append(active_neighbor_metadata[i])
+                                break
+            
+            filtered_count = len(active_neighbor_indices) - len(new_active_indices)
+            active_neighbor_indices = new_active_indices
+            active_neighbor_metadata = new_active_metadata
+            
+            print(f"  Local search: After property {prop_idx}, kept {len(active_neighbor_indices)} neighbors (filtered {filtered_count})")
     
-    # Apply distance functions
-    neighbor_distances = [
-        dist_func(prop_value)
-        for dist_func, prop_value in zip(distance_to_bounds_parallel, neighbor_prop_values)
-    ]
-    
-    # Stack into [total_neighbors, num_properties]
-    neighbor_distances_tensor = torch.stack(neighbor_distances, dim=-1)
+    print(f"  Local search: Final {len(active_neighbor_indices)} neighbors after all property filtering")
     
     print(f"  Local search: Updating best sequences...")
     
@@ -254,9 +312,11 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     max_keep = max(best_sequence_rank, 10)
     # Update best sequences if neighbors are better
-    for i, (batch_idx, pos, k_rank) in enumerate(all_neighbor_metadata):
-        neighbor_dist = neighbor_distances_tensor[i]  # [num_properties]
-        neighbor_tok = neighbor_tokens_batch[i]  # [seq_len]
+    # NOTE: Only iterate over ACTIVE neighbors (those that survived hierarchical filtering)
+    for local_idx, global_idx in enumerate(active_neighbor_indices):
+        batch_idx, pos, k_rank = active_neighbor_metadata[local_idx]
+        neighbor_dist = neighbor_distances_tensor[global_idx]  # [num_properties]
+        neighbor_tok = neighbor_tokens_batch[global_idx]  # [seq_len]
         
         # Check if this neighbor should be added to top sequences
         top_list = batch_top_sequences[batch_idx]
