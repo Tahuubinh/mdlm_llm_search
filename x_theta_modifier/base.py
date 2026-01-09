@@ -7,6 +7,7 @@ from properties.perplexity_property import calculate_perplexity, calc_perplexity
 from properties.repetition_property import count_repetition_violations, calc_repetition_violations_parallel
 from properties.quality_property import count_quality_violations, calc_quality_violations_parallel
 from properties.word_repetition_property import count_word_repetition_violations, calc_word_repetition_violations_parallel
+from properties.combined_quality import count_combined_quality_violations, calc_combined_quality_violations_parallel, measure_combined_quality_violations, measure_combined_quality_violations_parallel
 from properties.property_util import *
 
 
@@ -71,6 +72,8 @@ class XThetaModifier:
                 "repetition": calc_repetition_violations_parallel,
                 "quality": calc_quality_violations_parallel,
                 "word_repetition": calc_word_repetition_violations_parallel,
+                "combined_quality": calc_combined_quality_violations_parallel,
+                "measure_combined_quality": measure_combined_quality_violations_parallel,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")
@@ -94,6 +97,8 @@ class XThetaModifier:
                 "repetition": count_repetition_violations,
                 "quality": count_quality_violations,
                 "word_repetition": count_word_repetition_violations,
+                "combined_quality": count_combined_quality_violations,
+                "measure_combined_quality": measure_combined_quality_violations,
             }.get(prop)
             if calc_func is None:
                 raise ValueError(f"Unsupported property type: {prop}")
