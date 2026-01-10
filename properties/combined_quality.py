@@ -336,9 +336,9 @@ def measure_combined_quality_violations(text):
     
     # Top n-gram constraints (n=2,3,4)
     top_ngram_thresholds = {
-        2: 0.20,
-        3: 0.18,
-        4: 0.16
+        2: 0.35,
+        3: 0.30,
+        4: 0.25
     }
     
     for n, threshold in top_ngram_thresholds.items():
@@ -348,27 +348,30 @@ def measure_combined_quality_violations(text):
     
     # Duplicate n-gram constraints (n=5,6,7,8,9,10)
     duplicate_ngram_thresholds = {
-        5: 0.15,
-        6: 0.14,
-        7: 0.13,
-        8: 0.12,
-        9: 0.11,
-        10: 0.10
+        5: 0.25,
+        6: 0.24,
+        7: 0.23,
+        8: 0.22,
+        9: 0.21,
+        10: 0.20
     }
     
     for n, threshold in duplicate_ngram_thresholds.items():
         fraction = calculate_duplicate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            violations += (fraction - threshold)
+            # violations += (fraction - threshold)
+            violations += 1
 
     # Constraint 1: Mean word length is between 3 to 10 characters
     mean_length = calculate_mean_word_length(text)
     # if mean_length < 3.0 or mean_length > 10.0:
     #     violations += 1
     if mean_length < 3.0:
-        violations += (3.0 - mean_length)
-    if mean_length > 10.0:
+        # violations += (3.0 - mean_length)
+        violations += 1
+    elif mean_length > 10.0:
         violations += (mean_length - 10.0)
+        # violations += 1
     
     # # Constraint 2: Symbol-to-word ratio is less than 0.1
     # symbol_ratio = calculate_symbol_to_word_ratio(text)
@@ -377,8 +380,9 @@ def measure_combined_quality_violations(text):
     
     # Constraint 3: 80% of words contain at least one alphabetic character
     alpha_ratio = calculate_alphabetic_word_ratio(text)
-    if alpha_ratio < 0.8:
-        violations += (0.8 - alpha_ratio)
+    if alpha_ratio < 0.7:
+        # violations += (0.7 - alpha_ratio)
+        violations += 1
 
     # Normalize text once for efficiency
     words = normalize_text_for_ngrams(text)
@@ -389,19 +393,22 @@ def measure_combined_quality_violations(text):
         # Constraint 1: 3-gram <= 0.30
         ratio_3 = calculate_word_ngram_repetition_ratio(words, 3)
         if ratio_3 > 0.30:
-            violations += (ratio_3 - 0.30)
+            # violations += (ratio_3 - 0.30)
+            violations += 1
         
         # Constraint 2: 4-gram <= 0.25 (only if text long enough)
         if len(words) >= 4:
             ratio_4 = calculate_word_ngram_repetition_ratio(words, 4)
             if ratio_4 > 0.25:
-                violations += (ratio_4 - 0.25)
+                # violations += (ratio_4 - 0.25)
+                violations += 1
         
         # Constraint 3: 5-gram <= 0.20 (only if text long enough)
         if len(words) >= 5:
             ratio_5 = calculate_word_ngram_repetition_ratio(words, 5)
             if ratio_5 > 0.20:
-                violations += (ratio_5 - 0.20)
+                # violations += (ratio_5 - 0.20)
+                violations += 1
     
     return violations
 

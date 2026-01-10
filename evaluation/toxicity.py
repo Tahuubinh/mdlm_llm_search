@@ -52,6 +52,15 @@ class GPTNeoForBinaryClassification(nn.Module):
             'logits': probs
         }
 
+def clean_text_sample(text):
+    """
+    Clean text by removing special tokens.
+    This must match the cleaning logic used during training/sampling.
+    """
+    cleaned = text.replace('<bos>', '').replace('<eos>', '').replace('<pad>', '').replace('<mask>', '').replace('<unk>', '').replace('<cls>', '').replace('<sep>', '').replace('<reserved>', '').strip()
+    return cleaned
+
+
 def load_model(path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Using device:", device)
@@ -100,8 +109,13 @@ if __name__ == "__main__":
             else:
                 with open(file_path, 'r') as f:
                     texts.append(f.read().strip())
+                    # raw_text = f.read().strip()
+                    # # Clean special tokens to match training/sampling preprocessing
+                    # cleaned_text = clean_text_sample(raw_text)
+                    # texts.append(cleaned_text)
 
-        # Tokenize the batch
+        # Tokenize the batch with SAME max_length as training (default or explicit)
+        # Using max_length=100 to match properties/toxicity_property.py calc_toxicity_parallel
         inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=100)
         device = model.gpt_neo.device  # Ensure device is defined within the batch processing loop
         input_ids = inputs["input_ids"].to(device)
