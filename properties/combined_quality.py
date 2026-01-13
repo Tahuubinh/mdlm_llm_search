@@ -367,8 +367,8 @@ def measure_combined_quality_violations(text):
     # if mean_length < 3.0 or mean_length > 10.0:
     #     violations += 1
     if mean_length < 3.0:
-        # violations += (3.0 - mean_length)
-        violations += 1
+        violations += (3.0 - mean_length)
+        # violations += 1
     elif mean_length > 10.0:
         violations += (mean_length - 10.0)
         # violations += 1
