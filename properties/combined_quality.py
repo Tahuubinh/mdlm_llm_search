@@ -344,7 +344,8 @@ def measure_combined_quality_violations(text):
     for n, threshold in top_ngram_thresholds.items():
         fraction = calculate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            violations += (fraction - threshold)
+            # violations += (fraction - threshold)
+            violations += 1
     
     # Duplicate n-gram constraints (n=5,6,7,8,9,10)
     duplicate_ngram_thresholds = {
@@ -367,11 +368,11 @@ def measure_combined_quality_violations(text):
     # if mean_length < 3.0 or mean_length > 10.0:
     #     violations += 1
     if mean_length < 3.0:
-        violations += (3.0 - mean_length)
-        # violations += 1
+        # violations += (3.0 - mean_length)
+        violations += 1
     elif mean_length > 10.0:
-        violations += (mean_length - 10.0)
-        # violations += 1
+        # violations += (mean_length - 10.0)
+        violations += 1
     
     # # Constraint 2: Symbol-to-word ratio is less than 0.1
     # symbol_ratio = calculate_symbol_to_word_ratio(text)
