@@ -75,6 +75,8 @@ def parse_arguments():
                        help='Directory containing prefix text files for toxicity generation')
     parser.add_argument('--start_sample_index', type=int, default=0,
                        help='Starting index for prefix file selection (e.g., 10 to start from 10.txt)')
+    parser.add_argument('--diffusion_steps', type=int, default=250,
+                       help='Number of diffusion steps for molecule generation (default: 250)')
 
     return parser.parse_args()
 
@@ -122,7 +124,7 @@ def main():
         checkpoint_path = 'outputs/toxicity/mdlm/best.ckpt'
         tokenizer_name_or_path = 'gpt2'
         sequence_length = 100
-        diffusion_steps = 100  # Can adjust this
+        diffusion_steps = args.diffusion_steps  # Can adjust this
 
     
     # Generate molecules
