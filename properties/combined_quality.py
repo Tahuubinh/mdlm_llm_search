@@ -368,11 +368,11 @@ def measure_combined_quality_violations(text):
     # if mean_length < 3.0 or mean_length > 10.0:
     #     violations += 1
     if mean_length < 3.0:
-        # violations += (3.0 - mean_length)
-        violations += 1
+        violations += (3.0 - mean_length)
+        # violations += 1
     elif mean_length > 10.0:
-        # violations += (mean_length - 10.0)
-        violations += 1
+        violations += (mean_length - 10.0)
+        # violations += 1
     
     # # Constraint 2: Symbol-to-word ratio is less than 0.1
     # symbol_ratio = calculate_symbol_to_word_ratio(text)
