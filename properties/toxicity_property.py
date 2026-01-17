@@ -169,7 +169,7 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     model.to('cuda')
     
     # Process in chunks to avoid OOM
-    chunk_size_gpu = 256
+    chunk_size_gpu = 128
     all_toxicity_scores = []
     
     for chunk_start in tqdm(range(0, batch_size, chunk_size_gpu), desc="Toxicity"):
