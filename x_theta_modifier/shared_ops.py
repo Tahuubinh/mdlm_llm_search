@@ -122,6 +122,59 @@ def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, prope
     return torch.stack(reshaped_distances, dim=-1)  # Shape: [batch_size, self.num_x_theta_samples, num_properties]
 
 def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel):
+    # Reshape samples for score calculation: (batch_size * num_x_theta_samples_keepbest, seq_len)
+    reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
+    # Decode SMILES strings from token IDs
+    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
+    
+    num_properties = len(property_calcs_parallel)
+    property_size = batch_size * num_x_theta_samples_keepbest
+    
+    # Lazy computation: only compute property when needed, but compute for all samples at once
+    all_distances = [None] * num_properties
+    
+    def get_distances_for_property(prop_idx):
+        """Compute distances for a property if not already computed (lazy evaluation)."""
+        if all_distances[prop_idx] is None:
+            # Compute property for ALL samples at once (parallel - this is correct and fast)
+            prop_value = property_calcs_parallel[prop_idx](smiles_list, property_size, device)
+            distance = distance_to_bounds_parallel[prop_idx](prop_value)
+            # Reshape to [batch_size, num_samples]
+            all_distances[prop_idx] = distance.reshape(batch_size, num_x_theta_samples_keepbest)
+        return all_distances[prop_idx]
+    
+    # Find best sample for each batch element
+    best_indices = []
+    
+    for b in range(batch_size):
+        # Track candidates: initially all samples are candidates
+        candidates = list(range(num_x_theta_samples_keepbest))
+        
+        # Compare properties one by one with early termination
+        for prop_idx in range(num_properties):
+            if len(candidates) == 1:
+                # Only one candidate left, no need to check more properties
+                break
+            
+            # Compute distances for this property (lazy - only if needed)
+            distances = get_distances_for_property(prop_idx)
+            
+            # Find minimum distance among candidates for this batch
+            min_dist = min(distances[b, idx] for idx in candidates)
+            
+            # Keep only candidates with minimum distance
+            candidates = [idx for idx in candidates if distances[b, idx] == min_dist]
+        
+        # Select first candidate (arbitrary choice among equals)
+        best_idx = candidates[0]
+        best_indices.append(best_idx)
+    
+    # Convert best_indices to tensor and gather best tokens
+    best_indices_tensor = torch.tensor(best_indices, device=device)
+    best_tokens = all_samples[best_indices_tensor, torch.arange(batch_size, device=device)]
+    return best_tokens
+
+def find_best_tokens_sort(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel):
     # Reshape samples for score calculation: (batch_size * self.num_x_theta_samples_keepbest, seq_len)
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
     
