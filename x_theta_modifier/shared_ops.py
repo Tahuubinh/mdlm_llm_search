@@ -122,7 +122,7 @@ def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, prope
     return torch.stack(reshaped_distances, dim=-1)  # Shape: [batch_size, self.num_x_theta_samples, num_properties]
 
 def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel):
-    # Reshape samples for score calculation: (batch_size * num_x_theta_samples_keepbest, seq_len)
+    # Reshape samples for score calculation: (batch_size * self.num_x_theta_samples_keepbest, seq_len)
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
     # Decode SMILES strings from token IDs
     smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
@@ -130,44 +130,67 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     num_properties = len(property_calcs_parallel)
     property_size = batch_size * num_x_theta_samples_keepbest
     
-    # Lazy computation: only compute property when needed, but compute for all samples at once
-    all_distances = [None] * num_properties
-    
-    def get_distances_for_property(prop_idx):
-        """Compute distances for a property if not already computed (lazy evaluation)."""
-        if all_distances[prop_idx] is None:
-            # Compute property for ALL samples at once (parallel - this is correct and fast)
-            prop_value = property_calcs_parallel[prop_idx](smiles_list, property_size, device)
-            distance = distance_to_bounds_parallel[prop_idx](prop_value)
-            # Reshape to [batch_size, num_samples]
-            all_distances[prop_idx] = distance.reshape(batch_size, num_x_theta_samples_keepbest)
-        return all_distances[prop_idx]
-    
-    # Find best sample for each batch element
+    # Initialize best tokens and distances for each batch element
+    # best_distances[b] will store [dist1, dist2, ...] for batch element b
+    best_distances = []
     best_indices = []
     
     for b in range(batch_size):
-        # Track candidates: initially all samples are candidates
-        candidates = list(range(num_x_theta_samples_keepbest))
+        # Get sequences for this batch element
+        start_idx = b * num_x_theta_samples_keepbest
+        end_idx = (b + 1) * num_x_theta_samples_keepbest
+        batch_sequences = smiles_list[start_idx:end_idx]
         
-        # Compare properties one by one with early termination
-        for prop_idx in range(num_properties):
-            if len(candidates) == 1:
-                # Only one candidate left, no need to check more properties
-                break
-            
-            # Compute distances for this property (lazy - only if needed)
-            distances = get_distances_for_property(prop_idx)
-            
-            # Find minimum distance among candidates for this batch
-            min_dist = min(distances[b, idx] for idx in candidates)
-            
-            # Keep only candidates with minimum distance
-            candidates = [idx for idx in candidates if distances[b, idx] == min_dist]
+        # Initialize with first sample as best
+        best_idx = 0
+        best_dist = None
         
-        # Select first candidate (arbitrary choice among equals)
-        best_idx = candidates[0]
+        # Iterate through all samples for this batch element
+        for sample_idx in range(num_x_theta_samples_keepbest):
+            sequence = batch_sequences[sample_idx]
+            
+            # Compute properties and distances one by one with early termination
+            current_distances = []
+            is_better = False
+            is_worse = False
+            
+            for prop_idx in range(num_properties):
+                # Compute property and distance for this index
+                # For parallel calcs, we pass a single-element list
+                prop_value = property_calcs_parallel[prop_idx]([sequence], 1, device)
+                distance = distance_to_bounds_parallel[prop_idx](prop_value)[0]  # Get scalar value
+                current_distances.append(distance.item() if torch.is_tensor(distance) else distance)
+                
+                # If this is the first sample, just store and continue
+                if best_dist is None:
+                    continue
+                
+                # Compare with best distance at this index
+                if current_distances[prop_idx] < best_dist[prop_idx]:
+                    is_better = True
+                    break  # This sample is better, no need to compute remaining properties for comparison
+                elif current_distances[prop_idx] > best_dist[prop_idx]:
+                    is_worse = True
+                    break  # This sample is worse, no need to compute remaining properties
+                # If equal, continue to next property
+            
+            # If this is the first sample, set as best
+            if best_dist is None:
+                best_dist = current_distances
+                best_idx = sample_idx
+            # If we found a better sample, compute remaining properties and update
+            elif is_better:
+                # Compute remaining properties for completeness
+                for prop_idx in range(len(current_distances), num_properties):
+                    prop_value = property_calcs_parallel[prop_idx]([sequence], 1, device)
+                    distance = distance_to_bounds_parallel[prop_idx](prop_value)[0]
+                    current_distances.append(distance.item() if torch.is_tensor(distance) else distance)
+                
+                best_dist = current_distances
+                best_idx = sample_idx
+        
         best_indices.append(best_idx)
+        best_distances.append(best_dist)
     
     # Convert best_indices to tensor and gather best tokens
     best_indices_tensor = torch.tensor(best_indices, device=device)
