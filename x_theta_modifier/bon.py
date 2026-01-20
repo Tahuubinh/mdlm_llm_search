@@ -19,7 +19,7 @@ class BoNXThetaModifier(XThetaModifier):
         else:
             modify_x_theta = modify_x_theta_no_condition
             print("Not using validity condition in XTheta Modifier.")
-        def _no_modification(x_theta, xt, step, best_clean_samples):
+        def _no_modification(x_theta, xt, step, best_clean_samples, prefix_lengths=None):
             all_samples = gumbel_sample(x_theta, self.num_x_theta_samples)
             # Replace values in all_samples with corresponding values from xt
             # at positions where non_mask is True, keeping other values unchanged.

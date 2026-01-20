@@ -37,7 +37,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
         modify_x_theta = modify_x_theta_no_condition
         print("Using language local search (no validity condition).")
         
-        def _language_local_search(x_theta, xt, step, best_clean_samples):
+        def _language_local_search(x_theta, xt, step, best_clean_samples, prefix_lengths=None):
             # all_samples = gumbel_sample(x_theta, self.num_x_theta_samples)
             all_samples = gumbel_sample_sequential(x_theta, self.num_x_theta_samples)
             # Replace values in all_samples with corresponding values from xt
@@ -90,6 +90,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     sampling_method=self.local_search_sampling_method,
                     locally_typical_alpha=self.locally_typical_alpha,
                     best_sequence_rank=self.best_sequence_rank,
+                    prefix_lengths=prefix_lengths,
                     device=device
                 )
                 print(f"Step {step}: Local search completed")

@@ -9,7 +9,7 @@ class StandardXThetaModifier(XThetaModifier):
         super().__init__(*args, **kwargs)
 
     def get_x_theta_method(self):
-        def _no_modification(x_theta, xt, step, best_clean_samples):
+        def _no_modification(x_theta, xt, step, best_clean_samples, prefix_lengths=None):
             return x_theta, xt
         
         return _no_modification

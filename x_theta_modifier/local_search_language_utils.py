@@ -111,7 +111,7 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, device='cuda'):
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, prefix_lengths=None, device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -124,6 +124,10 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     2. Clean text: remove special tokens
     3. Pass cleaned text to property calculators (they handle encoding internally)
     
+    CRITICAL: Prefix Protection
+    - If prefix_lengths is provided, prefix tokens will NEVER be modified
+    - Only non-prefix positions are candidates for local search
+    
     Args:
         best_tokens: Current best sequences (batch_size x seq_len) tensor of token IDs
         x_theta_probs: Probability distribution over vocab (batch_size x seq_len x vocab_size)
@@ -133,12 +137,24 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         top_k_values_for_local_search: Number of top-k values to try per position
         sampling_method: Selection method - 'top_p' (highest probability) or 'locally_typical' (closest to entropy)
         best_sequence_rank: Select the sequence with the Nth smallest distance (1=best, 2=second best, etc.)
+        prefix_lengths: Optional tensor of shape (batch_size,) indicating prefix length for each sequence
         device: Device to use
     
     Returns:
         best_tokens: Best sequences found (batch_size x seq_len) tensor
     """
     batch_size, seq_len = best_tokens.shape
+    
+    # Create prefix mask: True for positions that should NOT be modified
+    if prefix_lengths is not None:
+        # Create a mask where prefix positions are True (protected)
+        prefix_mask = torch.zeros((batch_size, seq_len), dtype=torch.bool, device=device)
+        for batch_idx, prefix_len in enumerate(prefix_lengths):
+            if prefix_len > 0:
+                prefix_mask[batch_idx, :prefix_len] = True
+        print(f"  Local search: Protecting prefix tokens (lengths: {prefix_lengths.tolist()})")
+    else:
+        prefix_mask = None
     
     # NOTE: We calculate best_distances here to initialize batch_top_sequences later
     # This is needed for hierarchical comparison with neighbors
@@ -192,7 +208,11 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         # Create a mask for positions where candidate != current token
         is_different = candidate_tokens != best_tokens  # Shape: [batch_size, seq_len]
         
-        # Get indices of all positions that differ
+        # Apply prefix mask: exclude prefix positions from being modified
+        if prefix_mask is not None:
+            is_different = is_different & (~prefix_mask)
+        
+        # Get indices of all positions that differ (and are not in prefix)
         batch_indices, pos_indices = torch.where(is_different)
         
         if len(batch_indices) == 0:

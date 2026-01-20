@@ -836,6 +836,13 @@ class Diffusion(L.LightningModule):
     # Initialize best_clean_samples for x_theta modification
     best_clean_samples = None
     
+    # Extract prefix lengths if prefixes are provided
+    prefix_lengths = None
+    if prefixes is not None:
+      prefix_lengths = torch.tensor([min(len(token_ids), self.config.model.length) 
+                                     for _, token_ids in prefixes], 
+                                    dtype=torch.long, device=self.device)
+    
     # Diffusion sampling loop with progress bar
     for i in tqdm(range(num_steps), desc="Sampling steps", leave=False):
       t = timesteps[i] * torch.ones(x.shape[0], 1, device=self.device)
@@ -853,12 +860,13 @@ class Diffusion(L.LightningModule):
         p_x0 = p_x0_cache
       
       # Apply x_theta modification if configured
-      # Signature: _modify_x_theta(x_theta, xt, step, best_clean_samples)
+      # Signature: _modify_x_theta(x_theta, xt, step, best_clean_samples, prefix_lengths)
       p_x0, best_clean_samples = self._modify_x_theta(
         x_theta=p_x0, 
         xt=x, 
         step=i, 
-        best_clean_samples=best_clean_samples
+        best_clean_samples=best_clean_samples,
+        prefix_lengths=prefix_lengths
       )
       
       # Standard diffusion update with modified p_x0
