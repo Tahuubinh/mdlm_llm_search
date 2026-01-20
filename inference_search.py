@@ -225,6 +225,26 @@ def main():
             with open(raw_mol_file_path, 'w') as f:
                 f.write(post_prefix_text)
         print(f"\nGenerated raw molecules (post-prefix only) saved to: {raw_molecules_dir}/ ({len(raw_molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(raw_molecules) - 1})")
+        
+        # Save full molecules (with prefix)
+        full_molecules_dir = f"{mol_folder}/full_molecules"
+        os.makedirs(full_molecules_dir, exist_ok=True)
+        for i, mol in enumerate(molecules):
+            file_idx = args.start_sample_index + i
+            full_mol_file_path = f"{full_molecules_dir}/{file_idx}.txt"
+            with open(full_mol_file_path, 'w') as f:
+                f.write(mol)
+        print(f"\nGenerated full molecules (with prefix) saved to: {full_molecules_dir}/ ({len(molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(molecules) - 1})")
+        
+        # Save full raw molecules (with prefix)
+        full_raw_molecules_dir = f"{mol_folder}/full_raw_molecules"
+        os.makedirs(full_raw_molecules_dir, exist_ok=True)
+        for i, mol in enumerate(raw_molecules):
+            file_idx = args.start_sample_index + i
+            full_raw_mol_file_path = f"{full_raw_molecules_dir}/{file_idx}.txt"
+            with open(full_raw_mol_file_path, 'w') as f:
+                f.write(mol)
+        print(f"\nGenerated full raw molecules (with prefix) saved to: {full_raw_molecules_dir}/ ({len(raw_molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(raw_molecules) - 1})")
     else:
         # For other data types, save all to single file
         mol_file = f"{mol_folder}/molecules.txt"

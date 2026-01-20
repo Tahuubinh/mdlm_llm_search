@@ -1,5 +1,6 @@
 import torch
 from x_theta_modifier.local_search_utils import *
+from x_theta_modifier.local_search_language_utils import remove_prefix_from_texts
 
 def clean_text_samples(text_samples):
     """
@@ -130,9 +131,6 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     # Remove prefix from decoded texts for property evaluation
     # CRITICAL: Only evaluate properties on the GENERATED portion, not the prefix
     if prefix_lengths is not None:
-        # Import the utility function
-        from x_theta_modifier.local_search_language_utils import clean_text_samples, remove_prefix_from_texts
-        
         # Clean special tokens first
         smiles_list = clean_text_samples(smiles_list)
         
