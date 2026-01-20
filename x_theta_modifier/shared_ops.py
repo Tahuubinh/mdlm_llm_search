@@ -145,67 +145,47 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     num_properties = len(property_calcs_parallel)
     property_size = batch_size * num_x_theta_samples_keepbest
     
+    # OPTIMIZATION: Compute ALL properties for ALL samples at once (batch processing)
+    # This is MUCH faster than computing one-by-one
+    all_distances = []
+    for prop_idx in range(num_properties):
+        # Compute property for ALL samples in one batch
+        prop_values = property_calcs_parallel[prop_idx](smiles_list, property_size, device)
+        distances = distance_to_bounds_parallel[prop_idx](prop_values)
+        all_distances.append(distances)
+    
+    # Stack distances into shape [property_size, num_properties]
+    all_distances_tensor = torch.stack(all_distances, dim=-1)
+    
     # Initialize best tokens and distances for each batch element
-    # best_distances[b] will store [dist1, dist2, ...] for batch element b
-    best_distances = []
     best_indices = []
     
     for b in range(batch_size):
-        # Get sequences for this batch element
+        # Get distances for this batch element
         start_idx = b * num_x_theta_samples_keepbest
         end_idx = (b + 1) * num_x_theta_samples_keepbest
-        batch_sequences = smiles_list[start_idx:end_idx]
+        batch_distances = all_distances_tensor[start_idx:end_idx]  # Shape: [num_samples, num_properties]
         
-        # Initialize with first sample as best
+        # Find best sample using hierarchical comparison
         best_idx = 0
-        best_dist = None
+        best_dist = batch_distances[0].cpu().tolist()
         
-        # Iterate through all samples for this batch element
-        for sample_idx in range(num_x_theta_samples_keepbest):
-            sequence = batch_sequences[sample_idx]
+        for sample_idx in range(1, num_x_theta_samples_keepbest):
+            current_dist = batch_distances[sample_idx].cpu().tolist()
             
-            # Compute properties and distances one by one with early termination
-            current_distances = []
-            is_better = False
-            is_worse = False
-            
+            # Hierarchical comparison: compare property by property
             for prop_idx in range(num_properties):
-                # Compute property and distance for this index
-                # For parallel calcs, we pass a single-element list
-                prop_value = property_calcs_parallel[prop_idx]([sequence], 1, device)
-                distance = distance_to_bounds_parallel[prop_idx](prop_value)[0]  # Get scalar value
-                current_distances.append(distance.item() if torch.is_tensor(distance) else distance)
-                
-                # If this is the first sample, just store and continue
-                if best_dist is None:
-                    continue
-                
-                # Compare with best distance at this index
-                if current_distances[prop_idx] < best_dist[prop_idx]:
-                    is_better = True
-                    break  # This sample is better, no need to compute remaining properties for comparison
-                elif current_distances[prop_idx] > best_dist[prop_idx]:
-                    is_worse = True
-                    break  # This sample is worse, no need to compute remaining properties
+                if current_dist[prop_idx] < best_dist[prop_idx]:
+                    # This sample is better
+                    best_idx = sample_idx
+                    best_dist = current_dist
+                    break
+                elif current_dist[prop_idx] > best_dist[prop_idx]:
+                    # This sample is worse
+                    break
                 # If equal, continue to next property
-            
-            # If this is the first sample, set as best
-            if best_dist is None:
-                best_dist = current_distances
-                best_idx = sample_idx
-            # If we found a better sample, compute remaining properties and update
-            elif is_better:
-                # Compute remaining properties for completeness
-                for prop_idx in range(len(current_distances), num_properties):
-                    prop_value = property_calcs_parallel[prop_idx]([sequence], 1, device)
-                    distance = distance_to_bounds_parallel[prop_idx](prop_value)[0]
-                    current_distances.append(distance.item() if torch.is_tensor(distance) else distance)
-                
-                best_dist = current_distances
-                best_idx = sample_idx
         
         best_indices.append(best_idx)
-        best_distances.append(best_dist)
     
     # Convert best_indices to tensor and gather best tokens
     best_indices_tensor = torch.tensor(best_indices, device=device)
