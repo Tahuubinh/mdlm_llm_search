@@ -261,7 +261,7 @@ def main():
                 raw_mol_file.write(f"{mol}\n")
         print(f"\nGenerated raw molecules saved to: {raw_mol_file.name}")
 
-    time_file = f"{mol_folder}/generation_time.txt"
+    time_file = f"{mol_folder}/generation_time/start_index_{args.start_sample_index}_num_samples_{args.num_samples}.txt"
     os.makedirs(os.path.dirname(time_file), exist_ok=True)
     with open(time_file, 'w') as time_file:
        time_file.write(f"Generation time: {end_time - start_time} seconds\n")
