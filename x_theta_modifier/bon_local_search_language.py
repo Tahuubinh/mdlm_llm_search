@@ -69,7 +69,7 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                 else:
                     # Normal BoN: compute properties and select best
                     print(f"Step {step}: BoN selection from {num_x_theta_samples_keepbest} samples")
-                    best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel)
+                    best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel, prefix_lengths)
             
                     old_best_tokens = best_tokens.clone()
 

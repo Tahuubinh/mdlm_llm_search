@@ -111,6 +111,46 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
+def remove_prefix_from_texts(texts, tokenizer, prefix_lengths):
+    """
+    Remove prefix tokens from decoded texts for property evaluation.
+    Only the generated (non-prefix) portion should be evaluated.
+    
+    Args:
+        texts: List of decoded text strings (with special tokens removed)
+        tokenizer: Tokenizer for encoding/decoding
+        prefix_lengths: Tensor of shape (batch_size,) with prefix lengths
+    
+    Returns:
+        List of texts with prefix removed
+    """
+    if prefix_lengths is None:
+        return texts
+    
+    post_prefix_texts = []
+    for text, prefix_len in zip(texts, prefix_lengths.cpu().tolist()):
+        if prefix_len > 0:
+            # Re-tokenize the cleaned text to get tokens
+            # Note: We use the same tokenizer that was used for generation
+            tokens = tokenizer.encode(text, add_special_tokens=False)
+            
+            # Skip prefix tokens
+            post_prefix_tokens = tokens[prefix_len:]
+            
+            # Decode only the post-prefix part
+            if len(post_prefix_tokens) > 0:
+                post_prefix_text = tokenizer.decode(post_prefix_tokens)
+            else:
+                post_prefix_text = ""
+            
+            post_prefix_texts.append(post_prefix_text)
+        else:
+            # No prefix, use full text
+            post_prefix_texts.append(text)
+    
+    return post_prefix_texts
+
+
 def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, prefix_lengths=None, device='cuda'):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
@@ -164,9 +204,13 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     # Step 2: Clean text by removing special tokens
     best_texts_cleaned = clean_text_samples(best_texts)
     
-    # Step 3: Calculate properties using cleaned text (let property calculators handle encoding)
+    # Step 3: Remove prefix from texts for property evaluation
+    # CRITICAL: Only evaluate properties on the GENERATED portion, not the prefix
+    best_texts_for_eval = remove_prefix_from_texts(best_texts_cleaned, tokenizer, prefix_lengths)
+    
+    # Step 4: Calculate properties using post-prefix text only
     best_prop_values = [
-        calc(best_texts_cleaned, batch_size, device)
+        calc(best_texts_for_eval, batch_size, device)
         for calc in property_calcs_parallel
     ]
     
@@ -261,6 +305,17 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     neighbor_texts = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy())
     neighbor_texts_cleaned = clean_text_samples(neighbor_texts)
     
+    # Remove prefix from neighbor texts for property evaluation
+    # CRITICAL: We need to expand prefix_lengths to match all neighbors
+    if prefix_lengths is not None:
+        # Create expanded prefix_lengths for all neighbors based on their batch_idx
+        expanded_prefix_lengths = torch.tensor([prefix_lengths[metadata[0]].item() 
+                                                for metadata in all_neighbor_metadata], 
+                                               dtype=torch.long, device=device)
+        neighbor_texts_for_eval = remove_prefix_from_texts(neighbor_texts_cleaned, tokenizer, expanded_prefix_lengths)
+    else:
+        neighbor_texts_for_eval = neighbor_texts_cleaned
+    
     # Process each property in order (priority: first property is most important)
     for prop_idx in range(num_properties):
         if len(active_neighbor_indices) == 0:
@@ -269,8 +324,8 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         
         print(f"  Local search: Property {prop_idx}/{num_properties} - Evaluating {len(active_neighbor_indices)} active neighbors...")
         
-        # Get texts for active neighbors only
-        active_texts = [neighbor_texts_cleaned[i] for i in active_neighbor_indices]
+        # Get texts for active neighbors only (post-prefix portion)
+        active_texts = [neighbor_texts_for_eval[i] for i in active_neighbor_indices]
         
         # Calculate this property for active neighbors
         prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)

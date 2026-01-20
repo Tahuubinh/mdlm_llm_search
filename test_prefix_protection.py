@@ -17,6 +17,14 @@ class DummyTokenizer:
         else:
             # tensor
             return [" ".join(map(str, ids.cpu().tolist())) for ids in token_ids]
+    
+    def encode(self, text, add_special_tokens=False):
+        # Simple encode: convert string back to token IDs
+        return [int(x) for x in text.split()]
+    
+    def decode(self, token_ids):
+        # Simple decode: convert token IDs to string
+        return " ".join(map(str, token_ids))
 
 
 def dummy_property_calc(texts, batch_size, device):

@@ -121,11 +121,26 @@ def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, prope
     ]
     return torch.stack(reshaped_distances, dim=-1)  # Shape: [batch_size, self.num_x_theta_samples, num_properties]
 
-def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel):
+def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel, prefix_lengths=None):
     # Reshape samples for score calculation: (batch_size * self.num_x_theta_samples_keepbest, seq_len)
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
     # Decode SMILES strings from token IDs
     smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
+    
+    # Remove prefix from decoded texts for property evaluation
+    # CRITICAL: Only evaluate properties on the GENERATED portion, not the prefix
+    if prefix_lengths is not None:
+        # Import the utility function
+        from x_theta_modifier.local_search_language_utils import clean_text_samples, remove_prefix_from_texts
+        
+        # Clean special tokens first
+        smiles_list = clean_text_samples(smiles_list)
+        
+        # Expand prefix_lengths to match all samples
+        expanded_prefix_lengths = prefix_lengths.repeat_interleave(num_x_theta_samples_keepbest)
+        
+        # Remove prefix for evaluation
+        smiles_list = remove_prefix_from_texts(smiles_list, tokenizer, expanded_prefix_lengths)
     
     num_properties = len(property_calcs_parallel)
     property_size = batch_size * num_x_theta_samples_keepbest
