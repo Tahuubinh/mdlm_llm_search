@@ -111,47 +111,48 @@ def clean_text_samples(text_samples):
     return cleaned
 
 
-def remove_prefix_from_texts(texts, tokenizer, prefix_lengths):
+def remove_prefix_from_token_ids(token_ids, prefix_lengths):
     """
-    Remove prefix tokens from decoded texts for property evaluation.
-    Only the generated (non-prefix) portion should be evaluated.
+    Remove prefix tokens from token ID sequences before decoding.
+    This ensures we decode only the generated portion, avoiding re-tokenization issues.
     
     Args:
-        texts: List of decoded text strings (with special tokens removed)
-        tokenizer: Tokenizer for encoding/decoding
+        token_ids: Tensor of shape (batch_size, seq_len) with token IDs
         prefix_lengths: Tensor of shape (batch_size,) with prefix lengths
     
     Returns:
-        List of texts with prefix removed
+        Tensor of post-prefix token IDs with shape (batch_size, max_generated_len)
     """
     if prefix_lengths is None:
-        return texts
+        return token_ids
     
-    post_prefix_texts = []
-    for text, prefix_len in zip(texts, prefix_lengths.cpu().tolist()):
-        if prefix_len > 0:
-            # Re-tokenize the cleaned text to get tokens
-            # Note: We use the same tokenizer that was used for generation
-            tokens = tokenizer.encode(text, add_special_tokens=False)
-            
-            # Skip prefix tokens
-            post_prefix_tokens = tokens[prefix_len:]
-            
-            # Decode only the post-prefix part
-            if len(post_prefix_tokens) > 0:
-                post_prefix_text = tokenizer.decode(post_prefix_tokens)
-            else:
-                post_prefix_text = ""
-            
-            post_prefix_texts.append(post_prefix_text)
+    batch_size, seq_len = token_ids.shape
+    post_prefix_token_ids = []
+    
+    for batch_idx, prefix_len in enumerate(prefix_lengths.cpu().tolist()):
+        if prefix_len > 0 and prefix_len < seq_len:
+            # Extract only post-prefix tokens
+            post_prefix_tokens = token_ids[batch_idx, prefix_len:]
+            post_prefix_token_ids.append(post_prefix_tokens)
+        elif prefix_len >= seq_len:
+            # Entire sequence is prefix (shouldn't happen, but handle it)
+            # Return empty sequence
+            post_prefix_token_ids.append(torch.tensor([], dtype=token_ids.dtype, device=token_ids.device))
         else:
-            # No prefix, use full text
-            post_prefix_texts.append(text)
+            # No prefix, use full sequence
+            post_prefix_token_ids.append(token_ids[batch_idx])
     
-    return post_prefix_texts
+    # Pad to same length for batch processing
+    if len(post_prefix_token_ids) > 0:
+        max_len = max(len(t) for t in post_prefix_token_ids)
+        # Use tokenizer's pad_token_id (typically 50256 for GPT-2)
+        padded = torch.nn.utils.rnn.pad_sequence(post_prefix_token_ids, batch_first=True, padding_value=50256)
+        return padded
+    else:
+        return token_ids
 
 
-def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, prefix_lengths=None, device='cuda'):
+def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_parallel, property_calcs_parallel, tokenizer, top_k_values_for_local_search, sampling_method='top_p', locally_typical_alpha=0.0, best_sequence_rank=1, prefix_lengths=None, device='cuda', property_types=None):
     """
     Batch local search for language data using top-k values from x_theta probabilities.
     For each position, only try the top-k most probable tokens.
@@ -198,21 +199,42 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     # NOTE: We calculate best_distances here to initialize batch_top_sequences later
     # This is needed for hierarchical comparison with neighbors
-    # Step 1: Decode best_tokens to text
+    
+    # DEBUG: Log initial best sequence state BEFORE local search
+    print(f"  Local search: Initial best sequences (before optimization):")
+    
+    # Step 1: Decode best_tokens to text (full sequence with prefix)
     best_texts = tokenizer.batch_decode(best_tokens.cpu().numpy())
     
     # Step 2: Clean text by removing special tokens
     best_texts_cleaned = clean_text_samples(best_texts)
     
-    # Step 3: Remove prefix from texts for property evaluation
-    # CRITICAL: Only evaluate properties on the GENERATED portion, not the prefix
-    best_texts_for_eval = remove_prefix_from_texts(best_texts_cleaned, tokenizer, prefix_lengths)
+    # Step 3: For non-perplexity properties, create post-prefix version
+    # CRITICAL: NO normalization! File saving uses decode(tokens) directly, NOT encode→decode.
+    # Property evaluation must match: decode→clean only, no re-encoding.
+    post_prefix_token_ids = remove_prefix_from_token_ids(best_tokens, prefix_lengths)
+    post_prefix_texts_raw = tokenizer.batch_decode(post_prefix_token_ids.cpu().numpy())
+    post_prefix_texts_cleaned = clean_text_samples(post_prefix_texts_raw)
     
-    # Step 4: Calculate properties using post-prefix text only
-    best_prop_values = [
-        calc(best_texts_for_eval, batch_size, device)
-        for calc in property_calcs_parallel
-    ]
+    # Use cleaned text directly without normalization
+    best_texts_for_eval = post_prefix_texts_cleaned
+    
+    # Step 4: Calculate properties
+    # For each property, use appropriate text (full vs post-prefix)
+    # DEBUG: Print Batch 1 text for investigation
+    if batch_size > 1:
+        print(f"    DEBUG Initial eval Batch 1 text (first 200 chars): {repr(best_texts_for_eval[1][:200])}")
+    
+    best_prop_values = []
+    for prop_idx, calc in enumerate(property_calcs_parallel):
+        # Check if this property is perplexity - if so, use full text
+        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
+            # Use FULL text (with prefix) for perplexity to ensure coherence
+            prop_value = calc(best_texts_cleaned, batch_size, device)
+        else:
+            # Use post-prefix text for other properties (toxicity, quality, etc.)
+            prop_value = calc(best_texts_for_eval, batch_size, device)
+        best_prop_values.append(prop_value)
     
     # Apply distance functions to get distances
     best_distances = [
@@ -221,6 +243,11 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     ]
     # Stack into [batch_size, num_properties]
     best_distances_tensor = torch.stack(best_distances, dim=-1)
+    
+    # DEBUG: Print initial distances for each batch
+    for batch_idx in range(batch_size):
+        dist_str = ", ".join([f"{d:.4f}" for d in best_distances_tensor[batch_idx].cpu().tolist()])
+        print(f"    Batch {batch_idx} initial distances: [{dist_str}]")
     
     # Get top-k token indices for each position from x_theta using specified sampling method
     # x_theta_probs shape: (batch_size, seq_len, vocab_size)
@@ -305,14 +332,22 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     neighbor_texts = tokenizer.batch_decode(neighbor_tokens_batch.cpu().numpy())
     neighbor_texts_cleaned = clean_text_samples(neighbor_texts)
     
-    # Remove prefix from neighbor texts for property evaluation
-    # CRITICAL: We need to expand prefix_lengths to match all neighbors
+    # Create post-prefix version by slicing token IDs before decoding
+    # CRITICAL: Slice token IDs BEFORE decoding to avoid re-tokenization issues
     if prefix_lengths is not None:
         # Create expanded prefix_lengths for all neighbors based on their batch_idx
         expanded_prefix_lengths = torch.tensor([prefix_lengths[metadata[0]].item() 
                                                 for metadata in all_neighbor_metadata], 
                                                dtype=torch.long, device=device)
-        neighbor_texts_for_eval = remove_prefix_from_texts(neighbor_texts_cleaned, tokenizer, expanded_prefix_lengths)
+        # Slice token IDs before decoding
+        post_prefix_neighbor_tokens = remove_prefix_from_token_ids(neighbor_tokens_batch, expanded_prefix_lengths)
+        post_prefix_neighbor_texts_raw = tokenizer.batch_decode(post_prefix_neighbor_tokens.cpu().numpy())
+        post_prefix_neighbor_texts_cleaned = clean_text_samples(post_prefix_neighbor_texts_raw)
+        
+        # CRITICAL: NO normalization! Text evaluation must match text saved to file.
+        # File saving uses direct decode(tokens), NOT encode→decode→clean.
+        # So property evaluation must use the same: decode→clean, no re-encoding.
+        neighbor_texts_for_eval = post_prefix_neighbor_texts_cleaned
     else:
         neighbor_texts_for_eval = neighbor_texts_cleaned
     
@@ -328,7 +363,18 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         active_texts = [neighbor_texts_for_eval[i] for i in active_neighbor_indices]
         
         # Calculate this property for active neighbors
-        prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)
+        # Check if this property is perplexity - if so, use full text
+        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
+            # Use FULL text (with prefix) for perplexity
+            active_texts_full = [neighbor_texts_cleaned[i] for i in active_neighbor_indices]
+            prop_values = property_calcs_parallel[prop_idx](active_texts_full, len(active_texts_full), device)
+        else:
+            # Use post-prefix text for other properties
+            # DEBUG: Print first text for first property (usually toxicity)
+            if prop_idx == 0 and len(active_texts) > 0:
+                prop_name = property_types[prop_idx] if property_types and prop_idx < len(property_types) else f"property_{prop_idx}"
+                print(f"    DEBUG Property {prop_idx} ({prop_name}) - First text preview: {active_texts[0][:100]}...")
+            prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)
         
         # Apply distance function
         distances = distance_to_bounds_parallel[prop_idx](prop_values)
@@ -336,6 +382,22 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         # Store distances in the full tensor
         for local_idx, global_idx in enumerate(active_neighbor_indices):
             neighbor_distances_tensor[global_idx, prop_idx] = distances[local_idx]
+        
+        # Debug: print distance distribution for first 3 properties
+        if prop_idx < 3:
+            # Group by batch_idx for debugging
+            batch_neighbor_distances_debug = {b_idx: [] for b_idx in range(batch_size)}
+            for local_idx, global_idx in enumerate(active_neighbor_indices):
+                b_idx = active_neighbor_metadata[local_idx][0]
+                batch_neighbor_distances_debug[b_idx].append(distances[local_idx].item())
+            
+            for b_idx in range(batch_size):
+                if batch_neighbor_distances_debug[b_idx]:
+                    distances_this_batch = batch_neighbor_distances_debug[b_idx]
+                    min_dist = min(distances_this_batch)
+                    count_min = sum(1 for d in distances_this_batch if d == min_dist)
+                    unique_dists = len(set(distances_this_batch))
+                    print(f"    DEBUG Batch {b_idx} Property {prop_idx}: {len(distances_this_batch)} neighbors, {unique_dists} unique distances, {count_min} at min_dist={min_dist:.6f}")
         
         # If this is NOT the last property, filter neighbors by minimum distance (per batch)
         if prop_idx < num_properties - 1:
@@ -375,6 +437,7 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     print(f"  Local search: Final {len(active_neighbor_indices)} neighbors after all property filtering")
     
     print(f"  Local search: Updating best sequences...")
+    print(f"  Local search: Comparing {len(active_neighbor_indices)} final neighbors against initial sequences...")
     
     # Track top-k best sequences for each batch element
     # We'll store tuples of (distance_tensor, tokens_tensor) for each sequence
@@ -429,8 +492,52 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
             best_distances_tensor[batch_idx] = top_list[-1][0]
             best_tokens[batch_idx] = top_list[-1][1]
     
+    # DEBUG: Show which sequence was selected (initial vs neighbor)
+    print(f"  Local search: Sequence selection summary:")
+    for batch_idx in range(batch_size):
+        top_list = batch_top_sequences[batch_idx]
+        initial_dist = top_list[0][0].cpu().tolist()  # Initial is always at index 0
+        selected_dist = best_distances_tensor[batch_idx].cpu().tolist()
+        initial_str = f"[{initial_dist[0]:.2f}, {initial_dist[1]:.2f}, {initial_dist[2]:.2f}]"
+        selected_str = f"[{selected_dist[0]:.2f}, {selected_dist[1]:.2f}, {selected_dist[2]:.2f}]"
+        
+        # Check if selected is same as initial
+        is_same = torch.allclose(top_list[0][0], best_distances_tensor[batch_idx], atol=1e-6)
+        source = "KEPT initial" if is_same else "CHOSE neighbor"
+        print(f"    Batch {batch_idx}: Initial={initial_str} → Selected={selected_str} ({source})")
+    
     if best_sequence_rank > 1:
         print(f"  Local search: Selected sequences with rank {best_sequence_rank} (distance-wise)")
+    
+    # NO NORMALIZATION! Candidate tokens must stay unchanged!
+    # Properties were already calculated consistently during neighbor evaluation
+    # Normalization would change the tokens and make properties inconsistent
+    print(f"  Local search: Keeping selected tokens unchanged (no normalization)")
+    
+    # DEBUG: Print final distances (these are from selection, already accurate)
+    print(f"  Local search: Final best sequences (after selection):")
+    for batch_idx in range(batch_size):
+        dist_str = ", ".join([f"{d:.4f}" for d in best_distances_tensor[batch_idx].cpu().tolist()])
+        print(f"    Batch {batch_idx} final distances: [{dist_str}]")
+    
+    # DEBUG: Print actual text for first few batches to verify consistency
+    print(f"  Local search: Verifying best sequence texts:")
+    final_post_prefix_token_ids = remove_prefix_from_token_ids(best_tokens, prefix_lengths)
+    
+    # Decode WITHOUT skip_special_tokens to match file saving behavior
+    final_post_prefix_texts = tokenizer.batch_decode(final_post_prefix_token_ids.cpu().numpy(), skip_special_tokens=False)
+    
+    for batch_idx in range(min(3, batch_size)):  # Show first 3 batches
+        text_preview = final_post_prefix_texts[batch_idx].replace('\n', '\\n')[:80]
+        print(f"    Batch {batch_idx} text (post-prefix, NO skip_special_tokens): {text_preview}...")
+        
+        # Also print with skip_special_tokens=True for comparison
+        text_with_skip = tokenizer.decode(final_post_prefix_token_ids[batch_idx].cpu().tolist(), skip_special_tokens=True).replace('\n', '\\n')[:80]
+        print(f"    Batch {batch_idx} text (post-prefix, WITH skip_special_tokens): {text_with_skip}...")
+        
+        # Print first 20 token IDs for inspection
+        token_ids_str = str(final_post_prefix_token_ids[batch_idx].cpu().tolist()[:20])
+        print(f"    Batch {batch_idx} first 20 token IDs: {token_ids_str}")
     
     return best_tokens
 

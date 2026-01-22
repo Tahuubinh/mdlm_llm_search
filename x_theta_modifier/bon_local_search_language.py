@@ -45,9 +45,11 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
             all_samples, non_mask = keep_nonmask_values(all_samples, xt, self.mask_index)
             num_x_theta_samples_keepbest = self.num_x_theta_samples
             if best_clean_samples is not None:  # Check if best_clean_samples is not empty
+                print(f"  DEBUG Step {step}: Adding best_clean_samples to candidates (best_clean_samples shape: {best_clean_samples.shape})")
                 best_clean_samples_expanded = best_clean_samples.unsqueeze(0)
                 all_samples = torch.cat([all_samples, best_clean_samples_expanded], dim=0)
                 num_x_theta_samples_keepbest += 1
+                print(f"  DEBUG Step {step}: Total candidates now: {num_x_theta_samples_keepbest} (all_samples shape: {all_samples.shape})")
 
             device = all_samples.device
             batch_shape = x_theta.shape[:-1]
@@ -68,8 +70,10 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     old_best_tokens = best_tokens.clone()
                 else:
                     # Normal BoN: compute properties and select best
+                    # CRITICAL FIX: Pass best_clean_samples index to ensure we never get worse
+                    best_clean_samples_idx = num_x_theta_samples_keepbest - 1 if best_clean_samples is not None else None
                     print(f"Step {step}: BoN selection from {num_x_theta_samples_keepbest} samples")
-                    best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel, prefix_lengths)
+                    best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel, prefix_lengths, self.property_type, best_clean_samples_idx)
             
                     old_best_tokens = best_tokens.clone()
 
@@ -91,7 +95,8 @@ class BoNLocalSearchLanguageXThetaModifier(XThetaModifier):
                     locally_typical_alpha=self.locally_typical_alpha,
                     best_sequence_rank=self.best_sequence_rank,
                     prefix_lengths=prefix_lengths,
-                    device=device
+                    device=device,
+                    property_types=self.property_type
                 )
                 print(f"Step {step}: Local search completed")
 

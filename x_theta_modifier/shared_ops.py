@@ -1,6 +1,6 @@
 import torch
 from x_theta_modifier.local_search_utils import *
-from x_theta_modifier.local_search_language_utils import remove_prefix_from_texts
+from x_theta_modifier.local_search_language_utils import remove_prefix_from_token_ids
 
 def clean_text_samples(text_samples):
     """
@@ -122,23 +122,29 @@ def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, prope
     ]
     return torch.stack(reshaped_distances, dim=-1)  # Shape: [batch_size, self.num_x_theta_samples, num_properties]
 
-def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel, prefix_lengths=None):
+def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, property_calcs_parallel, distance_to_bounds_parallel, prefix_lengths=None, property_types=None, best_clean_samples_idx=None):
     # Reshape samples for score calculation: (batch_size * self.num_x_theta_samples_keepbest, seq_len)
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
-    # Decode SMILES strings from token IDs
-    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
     
-    # Remove prefix from decoded texts for property evaluation
-    # CRITICAL: Only evaluate properties on the GENERATED portion, not the prefix
+    # Decode full sequences
+    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
+    smiles_list_cleaned = clean_text_samples(smiles_list)
+    
+    # Create post-prefix version by slicing token IDs before decoding
+    # CRITICAL: Slice token IDs BEFORE decoding to avoid re-tokenization issues
+    smiles_list_for_eval = smiles_list_cleaned
     if prefix_lengths is not None:
-        # Clean special tokens first
-        smiles_list = clean_text_samples(smiles_list)
-        
         # Expand prefix_lengths to match all samples
         expanded_prefix_lengths = prefix_lengths.repeat_interleave(num_x_theta_samples_keepbest)
         
-        # Remove prefix for evaluation
-        smiles_list = remove_prefix_from_texts(smiles_list, tokenizer, expanded_prefix_lengths)
+        # Slice token IDs before decoding
+        post_prefix_samples = remove_prefix_from_token_ids(reshaped_samples, expanded_prefix_lengths)
+        post_prefix_texts_raw = tokenizer.batch_decode(post_prefix_samples.cpu().numpy())
+        post_prefix_texts_cleaned = clean_text_samples(post_prefix_texts_raw)
+        
+        # CRITICAL: NO normalization! File saving uses decode(tokens) directly.
+        # Property evaluation must match: decode→clean only, no re-encoding.
+        smiles_list_for_eval = post_prefix_texts_cleaned
     
     num_properties = len(property_calcs_parallel)
     property_size = batch_size * num_x_theta_samples_keepbest
@@ -147,13 +153,29 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     # This is MUCH faster than computing one-by-one
     all_distances = []
     for prop_idx in range(num_properties):
-        # Compute property for ALL samples in one batch
-        prop_values = property_calcs_parallel[prop_idx](smiles_list, property_size, device)
+        # Check if this property is perplexity - if so, use full text
+        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
+            # Use FULL text (with prefix) for perplexity
+            prop_values = property_calcs_parallel[prop_idx](smiles_list_cleaned, property_size, device)
+        else:
+            # Use post-prefix text for other properties
+            prop_values = property_calcs_parallel[prop_idx](smiles_list_for_eval, property_size, device)
+        
         distances = distance_to_bounds_parallel[prop_idx](prop_values)
         all_distances.append(distances)
     
     # Stack distances into shape [property_size, num_properties]
     all_distances_tensor = torch.stack(all_distances, dim=-1)
+    
+    # DEBUG: If best_clean_samples_idx provided, print its distance
+    if best_clean_samples_idx is not None:
+        print(f"    DEBUG BoN: best_clean_samples is at index {best_clean_samples_idx}/{num_x_theta_samples_keepbest-1}")
+        for b in range(batch_size):
+            start_idx = b * num_x_theta_samples_keepbest
+            best_clean_idx = start_idx + best_clean_samples_idx
+            best_clean_dist = all_distances_tensor[best_clean_idx].cpu().tolist()
+            dist_str = ", ".join([f"{d:.4f}" for d in best_clean_dist])
+            print(f"    DEBUG BoN Batch {b}: best_clean_samples distance = [{dist_str}]")
     
     # Initialize best tokens and distances for each batch element
     best_indices = []
@@ -164,11 +186,20 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
         end_idx = (b + 1) * num_x_theta_samples_keepbest
         batch_distances = all_distances_tensor[start_idx:end_idx]  # Shape: [num_samples, num_properties]
         
-        # Find best sample using hierarchical comparison
-        best_idx = 0
-        best_dist = batch_distances[0].cpu().tolist()
+        # CRITICAL: If best_clean_samples_idx is provided, initialize with that sample
+        # This ensures we never get worse on the first property (hierarchical constraint)
+        if best_clean_samples_idx is not None:
+            best_idx = best_clean_samples_idx  # Last index is best_clean_samples
+            best_dist = batch_distances[best_idx].cpu().tolist()
+        else:
+            best_idx = 0
+            best_dist = batch_distances[0].cpu().tolist()
         
-        for sample_idx in range(1, num_x_theta_samples_keepbest):
+        # Compare all samples, only updating if strictly better hierarchically
+        for sample_idx in range(num_x_theta_samples_keepbest):
+            if best_clean_samples_idx is not None and sample_idx == best_clean_samples_idx:
+                continue  # Skip comparing best_clean_samples with itself
+            
             current_dist = batch_distances[sample_idx].cpu().tolist()
             
             # Hierarchical comparison: compare property by property

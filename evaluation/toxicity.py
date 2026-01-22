@@ -69,7 +69,11 @@ def load_model(path):
     
     model.load_state_dict(torch.load(path, map_location=device))
     model.to(device)
-    model.eval() 
+    # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
+    model.eval()
+    model.training = False
+    for module in model.modules():
+        module.training = False
     
     return model
 
@@ -108,7 +112,11 @@ if __name__ == "__main__":
                 texts.append("")  # Add empty string for missing files
             else:
                 with open(file_path, 'r') as f:
-                    texts.append(f.read().strip())
+                    text_content = f.read().strip()
+                    texts.append(text_content)
+                    # DEBUG: Print file 601.txt content
+                    if '601.txt' in file_path:
+                        print(f"    DEBUG eval/toxicity.py reading 601.txt (first 200 chars): {repr(text_content[:200])}")
                     # raw_text = f.read().strip()
                     # # Clean special tokens to match training/sampling preprocessing
                     # cleaned_text = clean_text_sample(raw_text)
@@ -116,14 +124,35 @@ if __name__ == "__main__":
 
         # Tokenize the batch with SAME max_length as training (default or explicit)
         # Using max_length=100 to match properties/toxicity_property.py calc_toxicity_parallel
-        inputs = tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=100)
+        # CRITICAL: padding='max_length' to ensure EXACTLY 100 tokens for consistency
+        inputs = tokenizer(texts, return_tensors="pt", padding='max_length', truncation=True, max_length=100)
         device = model.gpt_neo.device  # Ensure device is defined within the batch processing loop
         input_ids = inputs["input_ids"].to(device)
         attention_mask = inputs["attention_mask"].to(device)
+        
+        # DEBUG: Print token IDs for file 601.txt (index i where i+start_index=601)
+        debug_idx_601 = None
+        for idx, file_path in enumerate(file_paths):
+            if '601.txt' in file_path:
+                print(f"    DEBUG eval/toxicity Batch 1 input_ids: {input_ids[idx].cpu().tolist()[:20]}...(total {input_ids[idx].shape[0]} tokens)")
+                print(f"    DEBUG eval/toxicity Batch 1 attention_mask: {attention_mask[idx].cpu().tolist()[:20]}...(total {attention_mask[idx].shape[0]} tokens)")
+                debug_idx_601 = idx
+                break
+        
+        # Force deterministic behavior for reproducibility
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+        if hasattr(torch, 'use_deterministic_algorithms'):
+            torch.use_deterministic_algorithms(False)  # Some ops don't support deterministic
 
         # Compute the model output for the batch
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        # DEBUG: Print raw logit for file 601.txt
+        if debug_idx_601 is not None:
+            logit_value = outputs['logits'][debug_idx_601].item()
+            print(f"    DEBUG eval/toxicity Batch 1 RAW toxicity score (after sigmoid): {logit_value:.6f}")
 
         # Count files with toxicity > tau in this batch
         toxicity_scores = outputs['logits'].cpu().numpy().flatten()  # Ensure 1D array

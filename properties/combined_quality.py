@@ -65,6 +65,18 @@ def has_unicode_errors(text):
     """
     return '�' in text or '\ufffd' in text
 
+def count_unicode_errors(text):
+    """
+    Count the number of Unicode replacement characters (�) in the text.
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        int: Number of Unicode replacement characters
+    """
+    return text.count('�') + text.count('\ufffd')
+
 
 def calculate_filler_word_ratio(text):
     """
@@ -118,6 +130,154 @@ def calculate_single_char_word_ratio(text):
     
     ratio = single_char_count / len(words)
     return ratio
+
+
+def calculate_stop_word_ratio(text):
+    """
+    Calculate the ratio of common English stop words.
+    High stop word ratio indicates low content quality.
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        float: Ratio of stop words to total words (0.0-1.0)
+    """
+    # Common English stop words
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+        'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+        'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+        'should', 'could', 'may', 'might', 'must', 'can', 'that', 'this',
+        'these', 'those', 'it', 'its', 'he', 'she', 'they', 'them', 'their',
+        'his', 'her', 'who', 'which', 'what', 'where', 'when', 'why', 'how'
+    }
+    
+    words = text.lower().split()
+    if len(words) == 0:
+        return 0.0
+    
+    # Count stop words (remove punctuation first)
+    stop_word_count = 0
+    for word in words:
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        if clean_word in stop_words:
+            stop_word_count += 1
+    
+    ratio = stop_word_count / len(words)
+    return ratio
+
+
+def calculate_two_char_word_ratio(text):
+    """
+    Calculate the ratio of 2-character words.
+    High ratio indicates low quality (e.g., "to to to the the is is").
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        float: Ratio of 2-char words to total words (0.0-1.0)
+    """
+    words = text.split()
+    if len(words) == 0:
+        return 0.0
+    
+    two_char_count = 0
+    for word in words:
+        # Remove punctuation
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        if len(clean_word) == 2:
+            two_char_count += 1
+    
+    ratio = two_char_count / len(words)
+    return ratio
+
+
+def calculate_max_word_length(text):
+    """
+    Calculate the maximum word length in the text.
+    Very long words (>20 chars) are often gibberish.
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        int: Maximum word length in characters
+    """
+    words = text.split()
+    if len(words) == 0:
+        return 0
+    
+    max_length = 0
+    for word in words:
+        # Remove punctuation
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        if len(clean_word) > max_length:
+            max_length = len(clean_word)
+    
+    return max_length
+
+
+def calculate_newline_ratio(text):
+    """
+    Calculate the ratio of newline characters to total characters.
+    Too many newlines indicates poor formatting.
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        float: Ratio of newlines to total characters (0.0-1.0)
+    """
+    if len(text) == 0:
+        return 0.0
+    
+    newline_count = text.count('\n')
+    ratio = newline_count / len(text)
+    
+    return ratio
+
+
+def has_gibberish_pattern(text):
+    """
+    Check if text contains gibberish patterns:
+    - Words with >4 consecutive consonants
+    - Words with simple repeating patterns (aa, bb, cc)
+    
+    Args:
+        text: Input text string
+        
+    Returns:
+        bool: True if gibberish patterns detected
+    """
+    words = text.split()
+    consonants = 'bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ'
+    
+    for word in words:
+        # Remove punctuation
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        
+        # Check for >4 consecutive consonants
+        consonant_streak = 0
+        for char in clean_word:
+            if char in consonants:
+                consonant_streak += 1
+                if consonant_streak > 4:
+                    return True
+            else:
+                consonant_streak = 0
+        
+        # Check for repeating 2-char patterns (e.g., "enenen", "ining")
+        if len(clean_word) >= 6:
+            for i in range(len(clean_word) - 5):
+                pattern = clean_word[i:i+2]
+                # Check if this 2-char pattern repeats 3+ times consecutively
+                if clean_word[i:i+6] == pattern * 3:
+                    return True
+    
+    return False
+
 
 def calculate_ngram_char_fraction(text, n):
     """
@@ -695,8 +855,8 @@ def measure_combined_heuristic_violations(text):
     for n, threshold in top_ngram_thresholds.items():
         fraction = calculate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            # violations += (fraction - threshold)
-            violations += 1
+            violations += (fraction - threshold)
+            # violations += 1
     
     # Duplicate n-gram constraints (n=5,6,7,8,9,10)
     duplicate_ngram_thresholds = {
@@ -711,8 +871,8 @@ def measure_combined_heuristic_violations(text):
     for n, threshold in duplicate_ngram_thresholds.items():
         fraction = calculate_duplicate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            # violations += (fraction - threshold)
-            violations += 1
+            violations += (fraction - threshold)
+            # violations += 1
 
     # Constraint 1: Mean word length is between 3 to 10 characters
     mean_length = calculate_mean_word_length(text)
@@ -728,14 +888,15 @@ def measure_combined_heuristic_violations(text):
     # Constraint 2: Symbol-to-word ratio is less than 0.3
     # (allows normal punctuation but catches excessive symbols)
     symbol_ratio = calculate_symbol_to_word_ratio(text)
-    if symbol_ratio >= 0.3:
-        violations += 1
+    if symbol_ratio > 0.3:
+        # violations += 1
+        violations += (symbol_ratio - 0.3)
     
     # Constraint 3: 80% of words contain at least one alphabetic character
     alpha_ratio = calculate_alphabetic_word_ratio(text)
     if alpha_ratio < 0.7:
-        # violations += (0.7 - alpha_ratio)
-        violations += 1
+        violations += (0.7 - alpha_ratio)
+        # violations += 1
 
     # Normalize text once for efficiency
     words = normalize_text_for_ngrams(text)
@@ -746,47 +907,83 @@ def measure_combined_heuristic_violations(text):
         # Constraint 1: 3-gram <= 0.30
         ratio_3 = calculate_word_ngram_repetition_ratio(words, 3)
         if ratio_3 > 0.30:
-            # violations += (ratio_3 - 0.30)
-            violations += 1
+            violations += (ratio_3 - 0.30)
+            # violations += 1
         
         # Constraint 2: 4-gram <= 0.25 (only if text long enough)
         if len(words) >= 4:
             ratio_4 = calculate_word_ngram_repetition_ratio(words, 4)
             if ratio_4 > 0.25:
-                # violations += (ratio_4 - 0.25)
-                violations += 1
+                violations += (ratio_4 - 0.25)
+                # violations += 1
         
         # Constraint 3: 5-gram <= 0.20 (only if text long enough)
         if len(words) >= 5:
             ratio_5 = calculate_word_ngram_repetition_ratio(words, 5)
             if ratio_5 > 0.20:
-                # violations += (ratio_5 - 0.20)
-                violations += 1
+                violations += (ratio_5 - 0.20)
+                # violations += 1
 
     # Constraint 4: Vocabulary diversity should be at least 0.3
     # (i.e., at least 30% of words should be unique)
     vocab_diversity = calculate_vocabulary_diversity(text)
     if vocab_diversity < 0.3:
-        violations += 1
+        # violations += 1
+        violations += (0.3 - vocab_diversity)
     
     # Constraint 5: Consecutive word repetition should be less than 10%
     consecutive_rep = calculate_consecutive_repetition_ratio(text)
     if consecutive_rep > 0.1:
-        violations += 1
+        # violations += 1
+        violations += (consecutive_rep - 0.1)
     
     # Constraint 6: No Unicode errors
-    if has_unicode_errors(text):
-        violations += 1
+    if count_unicode_errors(text) > 0:
+        # violations += 1
+        violations += count_unicode_errors(text)
     
     # Constraint 7: Filler word ratio should be less than 5%
     filler_ratio = calculate_filler_word_ratio(text)
     if filler_ratio > 0.05:
-        violations += 1
+        # violations += 1
+        violations += (filler_ratio - 0.05)
     
     # Constraint 8: Single character word ratio (excluding 'a', 'I') should be less than 5%
     single_char_ratio = calculate_single_char_word_ratio(text)
-    if single_char_ratio > 0.05:
-        violations += 1
+    # if single_char_ratio > 0.05:
+    #     violations += 1
+    if single_char_ratio > 0.1:
+        violations += (single_char_ratio - 0.1)
+    
+    # Constraint 9: Stop word ratio should be less than 75%
+    # (For short text, allow slightly more stop words)
+    stop_word_ratio = calculate_stop_word_ratio(text)
+    if stop_word_ratio > 0.75:
+        violations += (stop_word_ratio - 0.75) #* 5  # Heavy penalty above 75%
+    
+    # Constraint 10: Two-character word ratio should be less than 35%
+    # (Catches "to to the is of" spam - stricter for short text)
+    two_char_ratio = calculate_two_char_word_ratio(text)
+    if two_char_ratio > 0.35:
+        violations += (two_char_ratio - 0.35) #* 3
+    
+    # Constraint 11: Maximum word length should be <= 15 characters
+    # (Very long words are usually gibberish - strict for short text)
+    max_word_len = calculate_max_word_length(text)
+    if max_word_len > 15:
+        violations += (max_word_len - 15) #* 0.2  # Penalty for each char over 15
+    
+    # Constraint 12: Newline ratio should be < 3%
+    # (For 100 tokens ≈ 500 chars, 3% = 15 newlines = reasonable paragraph breaks)
+    # (Too many newlines = poor formatting or line-by-line generation)
+    newline_ratio = calculate_newline_ratio(text)
+    if newline_ratio > 0.03:
+        violations += (newline_ratio - 0.03) #* 20  # Heavy penalty for excessive newlines
+    
+    # Constraint 13: No gibberish patterns
+    # (Consecutive consonants, repeating patterns)
+    if has_gibberish_pattern(text):
+        violations += 1.0 #5.0  # Heavy penalty for gibberish
     
     return violations
 
