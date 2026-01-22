@@ -71,9 +71,9 @@ def get_toxicity_model():
                     'logits': probs
                 }
         
-        # Always load on CPU initially to save GPU memory
-        _TOXICITY_DEVICE = torch.device('cpu')
-        print(f"Loading toxicity model on device: {_TOXICITY_DEVICE} (will move to GPU only during inference)")
+        # Load model directly on GPU and keep it there permanently
+        _TOXICITY_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Loading toxicity model on device: {_TOXICITY_DEVICE} (will stay in VRAM)")
         
         # Load model
         model_path = 'outputs/toxicity/classifier/toxicity_gpt2_neo.pt'
@@ -81,15 +81,25 @@ def get_toxicity_model():
             raise FileNotFoundError(f"Toxicity model not found at {model_path}")
         
         _TOXICITY_MODEL = GPTNeoForBinaryClassification()
-        _TOXICITY_MODEL.load_state_dict(torch.load(model_path, map_location='cpu'))
-        _TOXICITY_MODEL.to('cpu')
+        _TOXICITY_MODEL.load_state_dict(torch.load(model_path, map_location=_TOXICITY_DEVICE))
+        _TOXICITY_MODEL.to(_TOXICITY_DEVICE)
+        # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
         _TOXICITY_MODEL.eval()
+        _TOXICITY_MODEL.training = False
+        for module in _TOXICITY_MODEL.modules():
+            module.training = False
         
         # Setup tokenizer
         _TOXICITY_TOKENIZER = GPT2Tokenizer.from_pretrained('EleutherAI/gpt-neo-1.3B')
         _TOXICITY_TOKENIZER.pad_token = _TOXICITY_TOKENIZER.eos_token
         
-        print("Toxicity model loaded successfully on CPU!")
+        print(f"Toxicity model loaded successfully on {_TOXICITY_DEVICE}!")
+        
+        # OLD CODE (moved model between CPU/GPU to save VRAM):
+        # _TOXICITY_DEVICE = torch.device('cpu')
+        # print(f"Loading toxicity model on device: {_TOXICITY_DEVICE} (will move to GPU only during inference)")
+        # _TOXICITY_MODEL.to('cpu')
+        # _TOXICITY_MODEL.eval()
     
     return _TOXICITY_MODEL, _TOXICITY_TOKENIZER, _TOXICITY_DEVICE
 
@@ -111,13 +121,13 @@ def calculate_toxicity(text, max_length=100):
     try:
         model, tokenizer, model_device = get_toxicity_model()
         
-        # Move model to GPU temporarily
-        model.to('cuda')
-        # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
-        model.eval()
-        model.training = False
-        for module in model.modules():
-            module.training = False
+        # Model is already on GPU permanently, no need to move
+        # OLD CODE (moved model to GPU temporarily):
+        # model.to('cuda')
+        # model.eval()
+        # model.training = False
+        # for module in model.modules():
+        #     module.training = False
         
         # Force deterministic behavior
         torch.manual_seed(42)
@@ -145,11 +155,12 @@ def calculate_toxicity(text, max_length=100):
         # Free GPU memory immediately
         del input_ids, attention_mask, outputs
         
-        # Move model back to CPU
-        model.to('cpu')
-        model.eval()  # Maintain eval mode after moving back to CPU
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        # Model stays on GPU permanently, no need to move back to CPU
+        # OLD CODE (moved model back to CPU to save VRAM):
+        # model.to('cpu')
+        # model.eval()
+        # torch.cuda.empty_cache()
+        # torch.cuda.synchronize()
         
         return toxicity_score
     
@@ -176,14 +187,13 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     # Initialize rewards tensor
     rewards = torch.zeros(batch_size, device=device)
     
-    # Text-based approach: encode sequences using tokenizer
-    # Move model to GPU temporarily
-    model.to('cuda')
-    # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
-    model.eval()
-    model.training = False
-    for module in model.modules():
-        module.training = False
+    # Model is already on GPU permanently, no need to move
+    # OLD CODE (moved model to GPU temporarily):
+    # model.to('cuda')
+    # model.eval()
+    # model.training = False
+    # for module in model.modules():
+    #     module.training = False
     
     # Force deterministic behavior for reproducibility
     torch.manual_seed(42)
@@ -191,8 +201,8 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     if hasattr(torch, 'use_deterministic_algorithms'):
         torch.use_deterministic_algorithms(False)  # Some ops don't support deterministic
     
-    # Process in chunks to avoid OOM
-    chunk_size_gpu = 128
+    # Process in chunks to avoid OOM (reduced from 128 to 64)
+    chunk_size_gpu = 64
     all_toxicity_scores = []
     
     for chunk_start in tqdm(range(0, batch_size, chunk_size_gpu), desc="Toxicity"):
@@ -233,11 +243,12 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     # Concatenate all scores
     toxicity_scores = torch.cat(all_toxicity_scores) if len(all_toxicity_scores) > 1 else all_toxicity_scores[0]
     
-    # Move model back to CPU
-    model.to('cpu')
-    model.eval()  # Maintain eval mode after moving back to CPU
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # Model stays on GPU permanently, no need to move back to CPU
+    # OLD CODE (moved model back to CPU to save VRAM):
+    # model.to('cpu')
+    # model.eval()
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
     
     rewards[:batch_size] = toxicity_scores.to(device)
     return rewards

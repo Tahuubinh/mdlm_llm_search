@@ -29,20 +29,26 @@ def get_perplexity_model(model_name='gpt2-large'):
     global _PERPLEXITY_MODEL, _PERPLEXITY_TOKENIZER, _PERPLEXITY_DEVICE
     
     if _PERPLEXITY_MODEL is None:
-        # Always load on CPU initially to save GPU memory
-        _PERPLEXITY_DEVICE = torch.device('cpu')
-        print(f"Loading perplexity model ({model_name}) on device: {_PERPLEXITY_DEVICE} (will move to GPU only during inference)")
+        # Load model directly on GPU and keep it there permanently
+        _PERPLEXITY_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Loading perplexity model ({model_name}) on device: {_PERPLEXITY_DEVICE} (will stay in VRAM)")
         
         # Load tokenizer
         _PERPLEXITY_TOKENIZER = GPT2Tokenizer.from_pretrained(model_name)
         _PERPLEXITY_TOKENIZER.pad_token = _PERPLEXITY_TOKENIZER.eos_token
         
-        # Load model on CPU
+        # Load model on GPU
         _PERPLEXITY_MODEL = GPT2LMHeadModel.from_pretrained(model_name)
-        _PERPLEXITY_MODEL.to('cpu')
+        _PERPLEXITY_MODEL.to(_PERPLEXITY_DEVICE)
         _PERPLEXITY_MODEL.eval()
         
-        print("Perplexity model loaded successfully on CPU!")
+        print(f"Perplexity model loaded successfully on {_PERPLEXITY_DEVICE}!")
+        
+        # OLD CODE (moved model between CPU/GPU to save VRAM):
+        # _PERPLEXITY_DEVICE = torch.device('cpu')
+        # print(f"Loading perplexity model ({model_name}) on device: {_PERPLEXITY_DEVICE} (will move to GPU only during inference)")
+        # _PERPLEXITY_MODEL.to('cpu')
+        # _PERPLEXITY_MODEL.eval()
     
     return _PERPLEXITY_MODEL, _PERPLEXITY_TOKENIZER, _PERPLEXITY_DEVICE
 
@@ -65,10 +71,9 @@ def calculate_perplexity(text, model_name='gpt2-large', max_length=512):
     try:
         model, tokenizer, model_device = get_perplexity_model(model_name)
         
-        # Determine compute device (prefer GPU if available)
-        
-        # Move model to GPU temporarily
-        model.to('cuda')
+        # Model is already on GPU permanently, no need to move
+        # OLD CODE (moved model to GPU temporarily):
+        # model.to('cuda')
         
         # Tokenize
         encodings = tokenizer(
@@ -96,10 +101,11 @@ def calculate_perplexity(text, model_name='gpt2-large', max_length=512):
         # Free GPU memory immediately
         del input_ids, attention_mask, outputs
         
-        # Move model back to CPU
-        model.to('cpu')
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
+        # Model stays on GPU permanently, no need to move back to CPU
+        # OLD CODE (moved model back to CPU to save VRAM):
+        # model.to('cpu')
+        # torch.cuda.empty_cache()
+        # torch.cuda.synchronize()
         
         return ppl
     
@@ -139,11 +145,12 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
     if not valid_sequences:
         return perplexities
     
-    # Move model to GPU temporarily
-    model.to('cuda')
+    # Model is already on GPU permanently, no need to move
+    # OLD CODE (moved model to GPU temporarily):
+    # model.to('cuda')
     
-    # Process in chunks to avoid OOM when evaluating many neighbors
-    chunk_size_gpu = 128  # Process 128 sequences at a time (perplexity needs more memory)
+    # Process in chunks to avoid OOM (reduced from 128 to 64)
+    chunk_size_gpu = 64
     all_perplexities = []
     
     for chunk_start in tqdm(range(0, len(valid_sequences), chunk_size_gpu), desc="Perplexity"):
@@ -196,10 +203,11 @@ def calc_perplexity_parallel(sequence_list, batch_size, device, model_name='gpt2
     # Concatenate all perplexities
     batch_perplexities = torch.cat(all_perplexities) if len(all_perplexities) > 1 else all_perplexities[0]
     
-    # Move model back to CPU
-    model.to('cpu')
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # Model stays on GPU permanently, no need to move back to CPU
+    # OLD CODE (moved model back to CPU to save VRAM):
+    # model.to('cpu')
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
     
     # Assign scores to corresponding positions
     for idx, ppl in zip(valid_indices, batch_perplexities):
