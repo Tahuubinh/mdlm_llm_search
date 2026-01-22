@@ -134,7 +134,7 @@ def main():
     posterior_sampling_config = create_posterior_sampling_config(args)
     x_theta_config = create_x_theta_config(args)
     start_time = time.time()
-    molecules, raw_molecules = generate_molecules_no_guidance(
+    molecules, raw_molecules, token_ids = generate_molecules_no_guidance(
         data=data,
         sequence_length=sequence_length,
         diffusion_steps=diffusion_steps,
@@ -179,21 +179,29 @@ def main():
         
         # Save each output as separate file (post-prefix only)
         # File index matches prefix index (e.g., if start_sample_index=10, saves as 10.txt, 11.txt, ...)
+        # CRITICAL: Use token IDs directly from generation, not re-encoded text!
+        # This ensures consistency with property evaluation during generation.
         molecules_dir = f"{mol_folder}/molecules"
         os.makedirs(molecules_dir, exist_ok=True)
-        for i, mol in enumerate(molecules):
+        for i, (mol, mol_token_ids) in enumerate(zip(molecules, token_ids)):
             # Calculate the actual file index based on start_sample_index
             file_idx = args.start_sample_index + i
             
-            # Get the prefix text for this sample
+            # Get the prefix length for this sample (in tokens)
             if i < len(prefixes):
-                prefix_text = prefixes[i][0]
-                # Remove prefix from the generated text
-                if mol.startswith(prefix_text):
-                    post_prefix_text = mol[len(prefix_text):].strip()
+                prefix_text, prefix_token_ids = prefixes[i]
+                prefix_len = len(prefix_token_ids)
+                
+                # Use token IDs directly from generation (no re-encoding!)
+                # Slice tokens to remove prefix
+                if prefix_len > 0 and prefix_len < len(mol_token_ids):
+                    post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
+                    # Decode only the post-prefix part
+                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens).strip()
                 else:
-                    # Fallback: use full text if prefix doesn't match
-                    post_prefix_text = mol
+                    # Fallback: if prefix >= full length, use empty string
+                    # Or if no prefix, use full text
+                    post_prefix_text = mol if prefix_len == 0 else ""
             else:
                 post_prefix_text = mol
             
@@ -203,21 +211,28 @@ def main():
         print(f"\nGenerated molecules (post-prefix only) saved to: {molecules_dir}/ ({len(molecules)} files, indices {args.start_sample_index}-{args.start_sample_index + len(molecules) - 1})")
         
         # Save raw molecules (post-prefix only)
+        # CRITICAL: Use token IDs directly, same as cleaned molecules
         raw_molecules_dir = f"{mol_folder}/raw_molecules"
         os.makedirs(raw_molecules_dir, exist_ok=True)
-        for i, mol in enumerate(raw_molecules):
+        for i, (mol, mol_token_ids) in enumerate(zip(raw_molecules, token_ids)):
             # Calculate the actual file index based on start_sample_index
             file_idx = args.start_sample_index + i
             
-            # Get the prefix text for this sample
+            # Get the prefix length for this sample (in tokens)
             if i < len(prefixes):
-                prefix_text = prefixes[i][0]
-                # Remove prefix from the generated text
-                if mol.startswith(prefix_text):
-                    post_prefix_text = mol[len(prefix_text):].strip()
+                prefix_text, prefix_token_ids = prefixes[i]
+                prefix_len = len(prefix_token_ids)
+                
+                # Use token IDs directly from generation (no re-encoding!)
+                # Slice tokens to remove prefix
+                if prefix_len > 0 and prefix_len < len(mol_token_ids):
+                    post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
+                    # Decode only the post-prefix part
+                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens).strip()
                 else:
-                    # Fallback: use full text if prefix doesn't match
-                    post_prefix_text = mol
+                    # Fallback: if prefix >= full length, use empty string
+                    # Or if no prefix, use full text
+                    post_prefix_text = mol if prefix_len == 0 else ""
             else:
                 post_prefix_text = mol
             

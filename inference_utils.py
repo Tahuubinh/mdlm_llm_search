@@ -301,6 +301,7 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
     model.eval()
     
     all_samples = []
+    all_token_ids = []  # Store token IDs for consistent prefix removal
     prefix_idx = 0  # Track which prefix we're using
     
     for i in range(config.sampling.num_sample_batches):
@@ -333,6 +334,9 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
             else:
                 samples = model.sample()
             
+        # Store token IDs for consistent prefix removal later
+        all_token_ids.append(samples.cpu())
+        
         # Decode samples
         decoded_samples = tokenizer.batch_decode(samples)
         all_samples.extend(decoded_samples)
@@ -360,5 +364,8 @@ def generate_molecules_no_guidance(data, sequence_length, diffusion_steps, num_s
         if cleaned:
             cleaned_samples.append(cleaned)
     
-    # Return both cleaned and original samples
-    return cleaned_samples, all_samples[:num_samples]
+    # Concatenate all token IDs
+    all_token_ids_tensor = torch.cat(all_token_ids, dim=0)[:num_samples]
+    
+    # Return cleaned samples, raw samples, and token IDs
+    return cleaned_samples, all_samples[:num_samples], all_token_ids_tensor

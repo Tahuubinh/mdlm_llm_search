@@ -35,7 +35,7 @@ class BoNXThetaModifier(XThetaModifier):
             batch_size, seq_len = batch_shape
             tokenizer = self.tokenizer
 
-            best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel, prefix_lengths)
+            best_tokens = find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_theta_samples_keepbest, self.property_calcs_parallel, self.distance_to_bounds_parallel, prefix_lengths, self.property_type)
 
             new_x_theta, validity_mask = modify_x_theta(best_tokens, tokenizer, x_theta, batch_size, device)
 
