@@ -113,6 +113,17 @@ def calculate_toxicity(text, max_length=100):
         
         # Move model to GPU temporarily
         model.to('cuda')
+        # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
+        model.eval()
+        model.training = False
+        for module in model.modules():
+            module.training = False
+        
+        # Force deterministic behavior
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+        if hasattr(torch, 'use_deterministic_algorithms'):
+            torch.use_deterministic_algorithms(False)  # Some ops don't support deterministic
         
         # Tokenize
         inputs = tokenizer(
@@ -136,6 +147,7 @@ def calculate_toxicity(text, max_length=100):
         
         # Move model back to CPU
         model.to('cpu')
+        model.eval()  # Maintain eval mode after moving back to CPU
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
         
@@ -167,6 +179,17 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     # Text-based approach: encode sequences using tokenizer
     # Move model to GPU temporarily
     model.to('cuda')
+    # CRITICAL: Force eval mode recursively on ALL submodules (including gpt_neo)
+    model.eval()
+    model.training = False
+    for module in model.modules():
+        module.training = False
+    
+    # Force deterministic behavior for reproducibility
+    torch.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
+    if hasattr(torch, 'use_deterministic_algorithms'):
+        torch.use_deterministic_algorithms(False)  # Some ops don't support deterministic
     
     # Process in chunks to avoid OOM
     chunk_size_gpu = 128
@@ -177,17 +200,32 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
         chunk_sequences = sequence_list[chunk_start:chunk_end]
         
         # Tokenize chunk sequences
+        # CRITICAL: Must pad to EXACTLY max_length to match file evaluation
+        # padding='max_length' ensures consistent padding regardless of batch composition
         inputs = tokenizer(
             chunk_sequences,
             return_tensors='pt',
-            padding=True,
+            padding='max_length',  # Force pad to exactly max_length
             truncation=True,
             max_length=max_length
         ).to('cuda')
         
+        # DEBUG: Print token IDs for sequence at global index 1 if in this chunk
+        global_idx_1 = 1
+        if chunk_start <= global_idx_1 < chunk_end:
+            local_idx = global_idx_1 - chunk_start
+            print(f"    DEBUG properties/toxicity Batch 1 input_ids: {inputs['input_ids'][local_idx].cpu().tolist()[:20]}...(total {inputs['input_ids'][local_idx].shape[0]} tokens)")
+            print(f"    DEBUG properties/toxicity Batch 1 attention_mask: {inputs['attention_mask'][local_idx].cpu().tolist()[:20]}...(total {inputs['attention_mask'][local_idx].shape[0]} tokens)")
+        
         # Compute toxicity scores for chunk
         with torch.no_grad():
             outputs = model(**inputs)
+        
+        # DEBUG: Print logit value for Batch 1
+        if chunk_start <= global_idx_1 < chunk_end:
+            local_idx = global_idx_1 - chunk_start
+            logit_value = outputs['logits'][local_idx].item()
+            print(f"    DEBUG properties/toxicity Batch 1 RAW toxicity score (after sigmoid): {logit_value:.6f}")
         
         chunk_scores = outputs['logits'].squeeze(-1).cpu()
         all_toxicity_scores.append(chunk_scores)
@@ -197,6 +235,7 @@ def calc_toxicity_parallel(sequence_list, batch_size, device, max_length=100):
     
     # Move model back to CPU
     model.to('cpu')
+    model.eval()  # Maintain eval mode after moving back to CPU
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     

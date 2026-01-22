@@ -205,6 +205,10 @@ def main():
             else:
                 post_prefix_text = mol
             
+            # DEBUG: Print Batch 1 (index 1) text when saving
+            if i == 1:
+                print(f"    DEBUG File saving Batch 1 text (first 200 chars): {repr(post_prefix_text[:200])}")
+            
             mol_file_path = f"{molecules_dir}/{file_idx}.txt"
             with open(mol_file_path, 'w') as f:
                 f.write(post_prefix_text)
