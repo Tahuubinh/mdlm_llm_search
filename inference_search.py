@@ -192,7 +192,7 @@ def main():
                 prefix_text, prefix_token_ids = prefixes[i]
                 prefix_len = len(prefix_token_ids)
                 
-                # Use token IDs directly from generation (no re-encoding!)
+                # Use token IDs directly from generation (already normalized after local search!)
                 # Slice tokens to remove prefix
                 if prefix_len > 0 and prefix_len < len(mol_token_ids):
                     post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
@@ -223,7 +223,7 @@ def main():
                 prefix_text, prefix_token_ids = prefixes[i]
                 prefix_len = len(prefix_token_ids)
                 
-                # Use token IDs directly from generation (no re-encoding!)
+                # Use token IDs directly from generation (already normalized after local search!)
                 # Slice tokens to remove prefix
                 if prefix_len > 0 and prefix_len < len(mol_token_ids):
                     post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
