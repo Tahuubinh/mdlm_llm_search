@@ -229,13 +229,8 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
     
     best_prop_values = []
     for prop_idx, calc in enumerate(property_calcs_parallel):
-        # Check if this property is perplexity - if so, use full text
-        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
-            # Use FULL text (with prefix) for perplexity to ensure coherence
-            prop_value = calc(best_texts_cleaned, batch_size, device)
-        else:
-            # Use post-prefix text for other properties (toxicity, quality, etc.)
-            prop_value = calc(best_texts_for_eval, batch_size, device)
+        # All properties now use post-prefix text (no prefix)
+        prop_value = calc(best_texts_for_eval, batch_size, device)
         best_prop_values.append(prop_value)
     
     # Apply distance functions to get distances
@@ -380,18 +375,8 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         active_texts = [neighbor_texts_for_eval[i] for i in active_neighbor_indices]
         
         # Calculate this property for active neighbors
-        # Check if this property is perplexity - if so, use full text
-        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
-            # Use FULL text (with prefix) for perplexity
-            active_texts_full = [neighbor_texts_cleaned[i] for i in active_neighbor_indices]
-            prop_values = property_calcs_parallel[prop_idx](active_texts_full, len(active_texts_full), device)
-        else:
-            # Use post-prefix text for other properties
-            # DEBUG: Print first text for first property (COMMENTED OUT - too verbose)
-            # if prop_idx == 0 and len(active_texts) > 0:
-            #     prop_name = property_types[prop_idx] if property_types and prop_idx < len(property_types) else f"property_{prop_idx}"
-            #     print(f"    DEBUG Property {prop_idx} ({prop_name}) - First text preview: {active_texts[0][:100]}...")
-            prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)
+        # All properties now use post-prefix text (no prefix)
+        prop_values = property_calcs_parallel[prop_idx](active_texts, len(active_texts), device)
         
         # Apply distance function
         distances = distance_to_bounds_parallel[prop_idx](prop_values)

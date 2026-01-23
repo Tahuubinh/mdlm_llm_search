@@ -157,13 +157,8 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     # This is MUCH faster than computing one-by-one
     all_distances = []
     for prop_idx in range(num_properties):
-        # Check if this property is perplexity - if so, use full text
-        if property_types and prop_idx < len(property_types) and property_types[prop_idx] == 'perplexity':
-            # Use FULL text (with prefix) for perplexity
-            prop_values = property_calcs_parallel[prop_idx](smiles_list_cleaned, property_size, device)
-        else:
-            # Use post-prefix text for other properties
-            prop_values = property_calcs_parallel[prop_idx](smiles_list_for_eval, property_size, device)
+        # All properties now use post-prefix text (no prefix)
+        prop_values = property_calcs_parallel[prop_idx](smiles_list_for_eval, property_size, device)
         
         distances = distance_to_bounds_parallel[prop_idx](prop_values)
         all_distances.append(distances)
