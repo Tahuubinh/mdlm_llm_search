@@ -16,7 +16,8 @@ def clean_text_samples(text_samples):
     cleaned = []
     for sample in text_samples:
         # Remove all special tokens (matching inference_utils.py logic)
-        cleaned_text = sample.replace('<bos>', '').replace('<eos>', '').replace('<pad>', '').replace('<mask>', '').replace('<unk>', '').replace('<cls>', '').replace('<sep>', '').replace('<reserved>', '').strip()
+        # CRITICAL: Also remove <|endoftext|> to match file saving behavior
+        cleaned_text = sample.replace('<bos>', '').replace('<eos>', '').replace('<pad>', '').replace('<mask>', '').replace('<unk>', '').replace('<cls>', '').replace('<sep>', '').replace('<reserved>', '').replace('<|endoftext|>', '').strip()
         cleaned.append(cleaned_text)
     return cleaned
 
@@ -99,7 +100,8 @@ def compute_combined_distances(token_ids, batch_size, num_x_theta_samples, prope
     property_size = batch_size * num_x_theta_samples
     
     # Step 1: Decode token IDs to text
-    text_samples = tokenizer.batch_decode(token_ids.cpu().numpy())
+    # CRITICAL: skip_special_tokens=True to remove <|endoftext|> padding
+    text_samples = tokenizer.batch_decode(token_ids.cpu().numpy(), skip_special_tokens=True)
     
     # Step 2: Clean text by removing special tokens
     cleaned_texts = clean_text_samples(text_samples)
@@ -127,7 +129,8 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
     reshaped_samples = all_samples.transpose(0, 1).reshape(-1, seq_len)
     
     # Decode full sequences
-    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy())
+    # CRITICAL: skip_special_tokens=True to remove <|endoftext|> padding
+    smiles_list = tokenizer.batch_decode(reshaped_samples.cpu().numpy(), skip_special_tokens=True)
     smiles_list_cleaned = clean_text_samples(smiles_list)
     
     # Create post-prefix version by slicing token IDs before decoding
@@ -139,7 +142,8 @@ def find_best_tokens(all_samples, device, seq_len, tokenizer, batch_size, num_x_
         
         # Slice token IDs before decoding
         post_prefix_samples = remove_prefix_from_token_ids(reshaped_samples, expanded_prefix_lengths)
-        post_prefix_texts_raw = tokenizer.batch_decode(post_prefix_samples.cpu().numpy())
+        # CRITICAL: skip_special_tokens=True to remove <|endoftext|> padding
+        post_prefix_texts_raw = tokenizer.batch_decode(post_prefix_samples.cpu().numpy(), skip_special_tokens=True)
         post_prefix_texts_cleaned = clean_text_samples(post_prefix_texts_raw)
         
         # CRITICAL: NO normalization! File saving uses decode(tokens) directly.

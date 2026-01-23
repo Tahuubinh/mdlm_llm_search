@@ -855,8 +855,8 @@ def measure_combined_heuristic_violations(text):
     for n, threshold in top_ngram_thresholds.items():
         fraction = calculate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            violations += (fraction - threshold)
-            # violations += 1
+            # violations += (fraction - threshold)
+            violations += 1
     
     # Duplicate n-gram constraints (n=5,6,7,8,9,10)
     duplicate_ngram_thresholds = {
@@ -871,8 +871,8 @@ def measure_combined_heuristic_violations(text):
     for n, threshold in duplicate_ngram_thresholds.items():
         fraction = calculate_duplicate_ngram_char_fraction(text, n)
         if fraction > threshold:
-            violations += (fraction - threshold)
-            # violations += 1
+            # violations += (fraction - threshold)
+            violations += 1
 
     # Constraint 1: Mean word length is between 3 to 10 characters
     mean_length = calculate_mean_word_length(text)
@@ -889,14 +889,14 @@ def measure_combined_heuristic_violations(text):
     # (allows normal punctuation but catches excessive symbols)
     symbol_ratio = calculate_symbol_to_word_ratio(text)
     if symbol_ratio > 0.3:
-        # violations += 1
-        violations += (symbol_ratio - 0.3)
+        violations += 1
+        # violations += (symbol_ratio - 0.3)
     
     # Constraint 3: 80% of words contain at least one alphabetic character
     alpha_ratio = calculate_alphabetic_word_ratio(text)
     if alpha_ratio < 0.7:
-        violations += (0.7 - alpha_ratio)
-        # violations += 1
+        # violations += (0.7 - alpha_ratio)
+        violations += 1
 
     # Normalize text once for efficiency
     words = normalize_text_for_ngrams(text)
@@ -907,35 +907,35 @@ def measure_combined_heuristic_violations(text):
         # Constraint 1: 3-gram <= 0.30
         ratio_3 = calculate_word_ngram_repetition_ratio(words, 3)
         if ratio_3 > 0.30:
-            violations += (ratio_3 - 0.30)
-            # violations += 1
+            # violations += (ratio_3 - 0.30)
+            violations += 1
         
         # Constraint 2: 4-gram <= 0.25 (only if text long enough)
         if len(words) >= 4:
             ratio_4 = calculate_word_ngram_repetition_ratio(words, 4)
             if ratio_4 > 0.25:
-                violations += (ratio_4 - 0.25)
-                # violations += 1
+                # violations += (ratio_4 - 0.25)
+                violations += 1
         
         # Constraint 3: 5-gram <= 0.20 (only if text long enough)
         if len(words) >= 5:
             ratio_5 = calculate_word_ngram_repetition_ratio(words, 5)
             if ratio_5 > 0.20:
-                violations += (ratio_5 - 0.20)
-                # violations += 1
+                # violations += (ratio_5 - 0.20)
+                violations += 1
 
     # Constraint 4: Vocabulary diversity should be at least 0.3
     # (i.e., at least 30% of words should be unique)
     vocab_diversity = calculate_vocabulary_diversity(text)
     if vocab_diversity < 0.3:
-        # violations += 1
-        violations += (0.3 - vocab_diversity)
+        violations += 1
+        # violations += (0.3 - vocab_diversity)
     
     # Constraint 5: Consecutive word repetition should be less than 10%
     consecutive_rep = calculate_consecutive_repetition_ratio(text)
     if consecutive_rep > 0.1:
-        # violations += 1
-        violations += (consecutive_rep - 0.1)
+        violations += 1
+        # violations += (consecutive_rep - 0.1)
     
     # Constraint 6: No Unicode errors
     if count_unicode_errors(text) > 0:
@@ -945,27 +945,30 @@ def measure_combined_heuristic_violations(text):
     # Constraint 7: Filler word ratio should be less than 5%
     filler_ratio = calculate_filler_word_ratio(text)
     if filler_ratio > 0.05:
-        # violations += 1
-        violations += (filler_ratio - 0.05)
+        violations += 1
+        # violations += (filler_ratio - 0.05)
     
     # Constraint 8: Single character word ratio (excluding 'a', 'I') should be less than 5%
     single_char_ratio = calculate_single_char_word_ratio(text)
     # if single_char_ratio > 0.05:
     #     violations += 1
     if single_char_ratio > 0.1:
-        violations += (single_char_ratio - 0.1)
+        violations += 1
+        # violations += (single_char_ratio - 0.1)
     
     # Constraint 9: Stop word ratio should be less than 75%
     # (For short text, allow slightly more stop words)
     stop_word_ratio = calculate_stop_word_ratio(text)
     if stop_word_ratio > 0.75:
-        violations += (stop_word_ratio - 0.75) #* 5  # Heavy penalty above 75%
+        violations += 1
+        # violations += (stop_word_ratio - 0.75) #* 5  # Heavy penalty above 75%
     
     # Constraint 10: Two-character word ratio should be less than 35%
     # (Catches "to to the is of" spam - stricter for short text)
     two_char_ratio = calculate_two_char_word_ratio(text)
     if two_char_ratio > 0.35:
-        violations += (two_char_ratio - 0.35) #* 3
+        violations += 1
+        # violations += (two_char_ratio - 0.35) #* 3
     
     # Constraint 11: Maximum word length should be <= 15 characters
     # (Very long words are usually gibberish - strict for short text)
@@ -978,7 +981,8 @@ def measure_combined_heuristic_violations(text):
     # (Too many newlines = poor formatting or line-by-line generation)
     newline_ratio = calculate_newline_ratio(text)
     if newline_ratio > 0.03:
-        violations += (newline_ratio - 0.03) #* 20  # Heavy penalty for excessive newlines
+        violations += 1
+        # violations += (newline_ratio - 0.03) #* 20  # Heavy penalty for excessive newlines
     
     # Constraint 13: No gibberish patterns
     # (Consecutive consonants, repeating patterns)

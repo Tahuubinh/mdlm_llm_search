@@ -197,7 +197,8 @@ def main():
                 if prefix_len > 0 and prefix_len < len(mol_token_ids):
                     post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
                     # Decode only the post-prefix part
-                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens).strip()
+                    # CRITICAL: skip_special_tokens=True to remove <|endoftext|> padding
+                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens, skip_special_tokens=True).strip()
                 else:
                     # Fallback: if prefix >= full length, use empty string
                     # Or if no prefix, use full text
@@ -205,9 +206,21 @@ def main():
             else:
                 post_prefix_text = mol
             
-            # DEBUG: Print Batch 1 (index 1) text when saving
-            if i == 1:
-                print(f"    DEBUG File saving Batch 1 text (first 200 chars): {repr(post_prefix_text[:200])}")
+            # # DEBUG: Print token IDs and FULL text when saving (for verification)
+            # if i == 2:  # Print batch 2 (file 570) to debug toxicity issue
+            #     print(f"    DEBUG File saving Batch 2 (file {file_idx}):")
+            #     print(f"      Full token IDs (first 30): {mol_token_ids[:30].tolist() if hasattr(mol_token_ids, 'tolist') else mol_token_ids[:30]}")
+            #     print(f"      Prefix length: {prefix_len}")
+            #     print(f"      Post-prefix token IDs (first 20): {post_prefix_tokens[:20]}")
+            #     print(f"      Post-prefix text length: {len(post_prefix_text)} chars")
+            #     print(f"      Post-prefix FULL text: {repr(post_prefix_text)}")
+            # if i == 3:  # Print batch 3 (file 571) to debug toxicity issue
+            #     print(f"    DEBUG File saving Batch 3 (file {file_idx}):")
+            #     print(f"      Full token IDs (first 30): {mol_token_ids[:30].tolist() if hasattr(mol_token_ids, 'tolist') else mol_token_ids[:30]}")
+            #     print(f"      Prefix length: {prefix_len}")
+            #     print(f"      Post-prefix token IDs (first 20): {post_prefix_tokens[:20]}")
+            #     print(f"      Post-prefix text length: {len(post_prefix_text)} chars")
+            #     print(f"      Post-prefix FULL text: {repr(post_prefix_text)}")
             
             mol_file_path = f"{molecules_dir}/{file_idx}.txt"
             with open(mol_file_path, 'w') as f:
@@ -232,7 +245,8 @@ def main():
                 if prefix_len > 0 and prefix_len < len(mol_token_ids):
                     post_prefix_tokens = mol_token_ids[prefix_len:].tolist()
                     # Decode only the post-prefix part
-                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens).strip()
+                    # CRITICAL: skip_special_tokens=True to remove <|endoftext|> padding
+                    post_prefix_text = gpt2_tokenizer.decode(post_prefix_tokens, skip_special_tokens=True).strip()
                 else:
                     # Fallback: if prefix >= full length, use empty string
                     # Or if no prefix, use full text
