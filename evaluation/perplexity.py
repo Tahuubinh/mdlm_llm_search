@@ -25,29 +25,46 @@ def load_gpt2_model(model_name='gpt2-large'):
 
 
 def calculate_perplexity(model, tokenizer, text, device):
-    """Calculate perplexity for a single text - matching the reference implementation"""
+    """Calculate perplexity for a single text - matching the property calculation"""
     if not text or len(text.strip()) == 0:
         return float('inf')
     
-    # Tokenize the text (no truncation, padding="longest" for single text)
+    # Tokenize the text - MUST match property: truncation=True, max_length=512
     encodings = tokenizer(
         text,
         return_tensors="pt",
-        truncation=False,  # Don't truncate
-        padding="longest",  # Padding style from reference code
+        truncation=True,  # CRITICAL: Must match property calculation
+        max_length=512,   # CRITICAL: Must match property calculation
+        padding="longest",
     )
     
     input_ids = encodings["input_ids"].to(device)
     attention_mask = encodings["attention_mask"].to(device)
     
-    # Calculate perplexity using the same method as reference code
+    # Calculate perplexity - explicitly apply attention mask to match batch calculation
     with torch.no_grad():
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            labels=input_ids
         )
-        nll = outputs.loss.item()  # This is the average cross-entropy over tokens
+        
+        # Manual shift and loss calculation to ensure padding tokens are properly masked
+        logits = outputs.logits
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = input_ids[..., 1:].contiguous()
+        shift_attention_mask = attention_mask[..., 1:].contiguous()
+        
+        # Calculate loss per token
+        loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+        loss = loss_fct(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1)
+        )
+        loss = loss.view(shift_labels.size())
+        
+        # Apply attention mask and calculate mean loss (only on non-padding tokens)
+        nll = (loss * shift_attention_mask).sum() / shift_attention_mask.sum()
+        nll = nll.item()
     
     ppl = math.exp(nll)
     return ppl
