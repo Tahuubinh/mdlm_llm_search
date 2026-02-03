@@ -4,6 +4,7 @@ from properties.molecules import *
 from properties.trna import *
 from properties.toxicity_property import calculate_toxicity, calc_toxicity_parallel
 from properties.perplexity_property import calculate_perplexity, calc_perplexity_parallel
+from properties.reward_property import calculate_reward, calc_reward_parallel
 from properties.repetition_property import count_repetition_violations, calc_repetition_violations_parallel
 from properties.quality_property import count_quality_violations, calc_quality_violations_parallel
 from properties.word_repetition_property import count_word_repetition_violations, calc_word_repetition_violations_parallel
@@ -68,6 +69,7 @@ class Sampler:
                 "fold": check_fold_structure_constraints_parallel,
                 "toxicity": calc_toxicity_parallel,
                 "perplexity": calc_perplexity_parallel,
+                "reward": calc_reward_parallel,
                 "repetition": calc_repetition_violations_parallel,
                 "quality": calc_quality_violations_parallel,
                 "word_repetition": calc_word_repetition_violations_parallel,
@@ -96,6 +98,7 @@ class Sampler:
                 "fold": check_fold_structure_constraints,
                 "toxicity": calculate_toxicity,
                 "perplexity": calculate_perplexity,
+                "reward": calculate_reward,
                 "repetition": count_repetition_violations,
                 "quality": count_quality_violations,
                 "word_repetition": count_word_repetition_violations,

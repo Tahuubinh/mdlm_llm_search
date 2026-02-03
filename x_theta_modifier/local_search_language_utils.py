@@ -385,8 +385,8 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         for local_idx, global_idx in enumerate(active_neighbor_indices):
             neighbor_distances_tensor[global_idx, prop_idx] = distances[local_idx]
         
-        # Debug: print distance distribution for first 3 properties
-        if prop_idx < 3:
+        # Debug: print distance distribution for all properties (limit to first 5 to avoid spam)
+        if prop_idx < min(5, num_properties):
             # Group by batch_idx for debugging
             batch_neighbor_distances_debug = {b_idx: [] for b_idx in range(batch_size)}
             for local_idx, global_idx in enumerate(active_neighbor_indices):
@@ -500,8 +500,9 @@ def local_search_language_batch(best_tokens, x_theta_probs, distance_to_bounds_p
         top_list = batch_top_sequences[batch_idx]
         initial_dist = top_list[0][0].cpu().tolist()  # Initial is always at index 0
         selected_dist = best_distances_tensor[batch_idx].cpu().tolist()
-        initial_str = f"[{initial_dist[0]:.2f}, {initial_dist[1]:.2f}, {initial_dist[2]:.2f}]"
-        selected_str = f"[{selected_dist[0]:.2f}, {selected_dist[1]:.2f}, {selected_dist[2]:.2f}]"
+        # Format distances dynamically based on number of properties
+        initial_str = "[" + ", ".join([f"{d:.2f}" for d in initial_dist]) + "]"
+        selected_str = "[" + ", ".join([f"{d:.2f}" for d in selected_dist]) + "]"
         
         # Check if selected is same as initial
         is_same = torch.allclose(top_list[0][0], best_distances_tensor[batch_idx], atol=1e-6)
